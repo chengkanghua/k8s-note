@@ -58,9 +58,9 @@ $ hostnamectl set-hostname k8s-slave2 #设置slave2节点的hostname
 
 ```python
 $ cat >>/etc/hosts<<EOF
-172.21.51.143 k8s-master
-172.21.51.67 k8s-slave1
-172.21.51.68 k8s-slave2
+10.211.55.25 k8s-master
+10.211.55.26 k8s-slave1
+10.211.55.27 k8s-slave2
 EOF
 ```
 
@@ -72,7 +72,7 @@ EOF
 
 - **设置安全组开放端口**
 
-如果节点间无安全组限制（内网机器间可以任意访问），可以忽略，否则，至少保证如下端口可通： k8s-master节点：TCP：6443，2379，2380，60080，60081UDP协议端口全部打开 k8s-slave节点：UDP协议端口全部打开
+如果节点间无安全组限制（内网机器间可以任意访问），可以忽略，否则，至少保证如下端口可通： k8s-master节点：TCP：6443，2379，2380，60080，60081 UDP协议端口全部打开   k8s-slave节点：UDP协议端口全部打开
 
 - **设置iptables**
 
@@ -187,11 +187,11 @@ bootstrapTokens:
   - authentication
 kind: InitConfiguration
 localAPIEndpoint:
-  advertiseAddress: 172.21.51.143
+  advertiseAddress: 172.21.51.143  # 修改修改成master节点地址 
   bindPort: 6443
 nodeRegistration:
   criSocket: /var/run/dockershim.sock
-  name: k8s-master
+  name: k8s-master      # 修改
   taints: null
 ---
 apiServer:
@@ -205,12 +205,12 @@ dns:
 etcd:
   local:
     dataDir: /var/lib/etcd
-imageRepository: registry.aliyuncs.com/google_containers
+imageRepository: registry.aliyuncs.com/google_containers   # 镜像仓库地址修改成国内阿里云地址 
 kind: ClusterConfiguration
-kubernetesVersion: 1.21.5
+kubernetesVersion: 1.21.5    # 修改
 networking:
   dnsDomain: cluster.local
-  podSubnet: 10.244.0.0/16
+  podSubnet: 10.244.0.0/16  # 修改 
   serviceSubnet: 10.96.0.0/12
 scheduler: {}
 ```
@@ -309,6 +309,10 @@ $ kubeadm token create --print-join-command
 
 ```bash
 wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+-------------------------------------
+v0.19.2 版本在 158行
+# 仓库的地址
+https://github.com/flannel-io/flannel/blob/f30ebbb670dcbfa7ff5f0d1dd9cccacd2d660a41/Documentation/kube-flannel.yml
 ```
 
 - 修改配置，指定网卡名称，大概在文件的190行，添加一行配置：
@@ -379,7 +383,8 @@ $ cd /etc/kubernetes/pki
 # 查看当前证书有效期
 $ for i in $(ls *.crt); do echo "===== $i ====="; openssl x509 -in $i -text -noout | grep -A 3 'Validity' ; done
 
-$ mkdir backup_key; cp -rp ./* backup_key/
+$ # mkdir backup_key; cp -rp ./* backup_key/
+$ mkdir ../backup_key ; cp -rp * ../backup_key/ ; mv ../backup_key ./
 $ git clone https://github.com/yuyicai/update-kube-cert.git
 $ cd update-kube-cert/ 
 $ bash update-kubeadm-cert.sh all

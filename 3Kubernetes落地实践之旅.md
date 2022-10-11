@@ -187,6 +187,8 @@ spec:
       value: "123456"
     - name: MYSQL_DATABASE
       value: "myblog"
+      
+--------------------------------------------------json      
 {
     "apiVersion": "v1",
     "kind": "Pod",
@@ -256,6 +258,46 @@ $ kubectl explain Pod.apiVersion
 
 ###### [创建和访问Pod](http://49.7.203.222:3000/#/kubernetes-base/pod-base?id=创建和访问pod)
 
+
+
+前提pod.yaml
+
+```yaml
+[root@k8s-master one-pod]# cat pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myblog
+  namespace: luffy
+  labels:
+    component: myblog
+spec:
+  containers:
+  - name: nginx
+    image: nginx:latest
+    env:
+    - name: MYSQL_HOST
+      value: "127.0.0.1"
+    - name: MYSQL_PASSWD
+      value: "123456"
+    ports:
+    - containerPort: 80
+  - name: mysql
+    image: mysql:5.7
+    args:
+    - --character-set-server=utf8mb4
+    - --collation-server=utf8mb4_unicode_ci
+    ports:
+    - containerPort: 3306
+    env:
+    - name: MYSQL_ROOT_PASSWORD
+      value: "123456"
+    - name: MYSQL_DATABASE
+      value: "myblog"
+```
+
+
+
 ```bash
 ## 创建namespace, namespace是逻辑上的资源池
 $ kubectl create namespace luffy
@@ -269,16 +311,17 @@ $ kubectl -n luffy get pods -o wide
 NAME     READY   STATUS    RESTARTS   AGE    IP             NODE
 myblog   2/2     Running   0          3m     10.244.1.146   k8s-slave1
 
+kubectl -n luffy describe pod <pod name>   # 查看pod详情信息
 ## 回顾流程
 
 ## 使用Pod Ip访问服务,3306和8002
 $ curl 10.244.1.146:8002/blog/index/
 
 ## 进入容器,执行初始化, 不必到对应的主机执行docker exec
-$ kubectl -n luffy exec -ti myblog -c myblog bash
+$ kubectl -n luffy exec -ti myblog -c myblog -- bash
 / # env
 / # python3 manage.py migrate
-$ kubectl -n luffy exec -ti myblog -c mysql bash
+$ kubectl -n luffy exec -ti myblog -c mysql -- bash
 / # mysql -p123456
 
 ## 再次访问服务,3306和8002
@@ -312,6 +355,8 @@ $ kubectl -n luffy get pods -o wide
 $ kubectl -n luffy get po myblog -o yaml
 ## 查看pod的明细信息及事件
 $ kubectl -n luffy describe pod myblog
+# 查看命令空间事件
+kubectl -n luffy get ev
 ```
 
 ###### [Troubleshooting and Debugging](http://49.7.203.222:3000/#/kubernetes-base/pod-base?id=troubleshooting-and-debugging)
@@ -322,6 +367,7 @@ $ kubectl -n <namespace> exec <pod_name> -c <container_name> -ti /bin/sh
 
 #查看Pod内容器日志,显示标准或者错误输出日志
 $ kubectl -n <namespace> logs -f <pod_name> -c <container_name>
+$ kubectl -n <namespace> logs -f --tial=100  <pod_name> -c <container_name>
 ```
 
 ###### [更新服务版本](http://49.7.203.222:3000/#/kubernetes-base/pod-base?id=更新服务版本)
@@ -414,7 +460,7 @@ $ kubectl -n <namespace> delete pod <pod_name>
     ----     ------            ----               ----               -------
     Warning  FailedScheduling  12s (x2 over 12s)  default-scheduler  0/3 nodes are available: 3 node(s) didn't match node selector.
     
-  ## 为节点打标签
+  ## 为节点打标签   在master上执行就可以
   $ kubectl label node k8s-slave1 component=mysql
   
   ## 再次查看，已经运行成功
@@ -439,7 +485,8 @@ $ kubectl -n <namespace> delete pod <pod_name>
   
   ## 删除pod
   $ kubectl delete -f pod-with-volume.yaml
-  
+  $ kubectl -n luffy delete pod myblog   # 同步删除pod 需要等待
+  $ kubectl -n luffy delete pod myblog --force --grace-period=0  #异步处理，
   ## 再次创建Pod
   $ kubectl create -f pod-with-volume.yaml
   
@@ -566,8 +613,8 @@ $ kubectl -n <namespace> delete pod <pod_name>
         port: 8002
         scheme: HTTP
       initialDelaySeconds: 10 
-      timeoutSeconds: 2
       periodSeconds: 10
+      timeoutSeconds: 2
 ```
 
 - initialDelaySeconds：容器启动后第一次执行探测是需要等待多少秒。
@@ -986,17 +1033,20 @@ k8s提供两类资源，configMap和Secret，可以用来实现业务配置的�
   data:
     MYSQL_USER: cm9vdA==        #注意加-n参数， echo -n root|base64
     MYSQL_PASSWD: MTIzNDU2
+    
   ```
-
+  
   创建并查看：
-
+  
   ```bash
   $ kubectl create -f secret.yaml
   $ kubectl -n luffy get secret
+  
+  kubectl -n luffy get secret myblog -o yaml
   ```
-
+  
   如果不习惯这种方式，可以通过如下方式：
-
+  
   ```bash
   $ cat secret.txt
   MYSQL_USER=root
@@ -1028,6 +1078,64 @@ spec:
     - name: MYSQL_DATABASE
       value: "myblog"
 ...
+
+--------------------------------------------完整版
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mysql
+  namespace: luffy
+  labels:
+    component: mysql
+spec:
+  hostNetwork: true    # 声明pod的网络模式为host模式，效果同docker run --net=host
+  volumes: 
+  - name: mysql-data
+    hostPath: 
+      path: /opt/mysql/data
+  nodeSelector:   # 使用节点选择器将Pod调度到指定label的节点
+    component: mysql
+  containers:
+  - name: mysql
+    image: mysql:5.7
+    args:
+    - --character-set-server=utf8mb4
+    - --collation-server=utf8mb4_unicode_ci
+    ports:
+    - containerPort: 3306
+    env:
+    - name: MYSQL_USER
+      valueFrom:
+        secretKeyRef:
+          name: myblog
+          key: MYSQL_USER
+    - name: MYSQL_ROOT_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: myblog
+          key: MYSQL_PASSWD
+    - name: MYSQL_DATABASE
+      value: "myblog"
+    resources:
+      requests:
+        memory: 100Mi
+        cpu: 50m
+      limits:
+        memory: 500Mi
+        cpu: 100m
+    readinessProbe:
+      tcpSocket:
+        port: 3306
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      tcpSocket:
+        port: 3306
+      initialDelaySeconds: 15
+      periodSeconds: 20
+    volumeMounts:
+    - name: mysql-data
+      mountPath: /var/lib/mysql
 ```
 
 整体修改后的myblog的yaml，资源路径：`myblog/two-pod/myblog-with-config.yaml`
@@ -1218,7 +1326,7 @@ $ kubectl create -f pod-lifecycle.yaml
 ## 查看demo状态
 $ kubectl -n luffy get po -o wide -w
 
-## 查看调度节点的/tmp/loap/timing
+## 去部署的节点的宿主机上 查看调度节点的/tmp/loap/timing
 $ cat /tmp/loap/timing
 1585424708: INIT
 1585424746: START
@@ -1467,14 +1575,14 @@ controller实时检测pod状态，并保障副本数一直处于期望的值。
 $ kubectl -n luffy delete pod myblog-7c96c9f76b-qbbg7
 
 # 观察pod
-$ kubectl get pods -o wide
+$ kubectl -n luffy  get pods -o wide
 
 ## 设置两个副本, 或者通过kubectl -n luffy edit deploy myblog的方式，最好通过修改文件，然后apply的方式，这样yaml文件可以保持同步
 $ kubectl -n luffy scale deploy myblog --replicas=2
 deployment.extensions/myblog scaled
 
 # 观察pod
-$ kubectl get pods -o wide
+$ kubectl -n luffy get pods -o wide
 NAME                      READY   STATUS    RESTARTS   AGE
 myblog-7c96c9f76b-qbbg7   1/1     Running   0          11m
 myblog-7c96c9f76b-s6brm   1/1     Running   0          55s

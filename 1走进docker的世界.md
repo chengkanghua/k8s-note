@@ -193,6 +193,7 @@ systemctl status containerd
    - 使用tag命令
 
      ```bash
+     # Usage:  docker tag SOURCE_IMAGE[:TAG] TARGET_IMAGE[:TAG]
      $ docker tag nginx:alpine 172.21.51.143:5000/nginx:alpine
      $ docker images
      ```
@@ -261,6 +262,7 @@ systemctl status containerd
    # 进入容器内部
    $ docker exec -ti my-nginx-alpine /bin/sh
    # ps aux|grep nginx
+   # apt-get install -y curl
    # curl localhost:80
    ```
 
@@ -270,7 +272,7 @@ systemctl status containerd
    # 删掉旧服务,重新启动
    $ docker rm -f my-nginx-alpine
    $ docker run --name my-nginx-alpine -d -p 8080:80 nginx:alpine
-   $ curl 172.21.51.143:8080
+   $ curl localhost:8088
    ```
 
 3. docker client如何与daemon通信
@@ -688,6 +690,11 @@ $ docker exec -ti my-nginx /bin/sh
 
 # [多阶构建](http://49.7.203.222:3000/#/docker/multi-build?id=多阶构建)
 
+从Docker17.0.5版本开始，引入了"多阶构建(multstage build)"的功能。在同一个Dockerfile文件中，包含两条FROM指令，分别引用两个不同的基础image，本质上包含了两个image的构建过程，代表了上述方法中两个不同的阶段，所以是多阶构建。另外，后者可以直接引用前者的中间产物，在本例中，后者直接COPY前者生成的/go/src/github.com/alexellis/href-counter/app文件。
+原文链接：https://blog.csdn.net/dkfajsldfsdfsd/article/details/88781816
+
+
+
 https://gitee.com/agagin/href-counter.git
 
 原始构建：
@@ -773,7 +780,7 @@ $ docker build . -t sample:v2 -f Dockerfile.multi
 
 ###### [django项目介绍](http://49.7.203.222:3000/#/docker/containerization?id=django项目介绍)
 
-- 项目地址：https://gitee.com/agagin/python-demo.git
+- 项目地址：https://gitee.com/chengkanghua/python-demo.git
 - python3 + django + uwsgi + nginx + mysql
 - 内部服务端口8002
 
@@ -836,6 +843,7 @@ $ docker run -d -p 3306:3306 --name mysql  -v /opt/mysql:/var/lib/mysql -e MYSQL
 $ docker exec -ti mysql bash
 #/ mysql -uroot -p123456
 #/ show databases;
+#/ create database myblog charset=utf8mb4;
 
 ## navicator连接
 ```
@@ -844,7 +852,7 @@ $ docker exec -ti mysql bash
 
 ```bash
 ## 启动容器
-$ docker run -d -p 8002:8002 --name myblog -e MYSQL_HOST=172.21.51.143 -e MYSQL_USER=root -e MYSQL_PASSWD=123456  myblog:v1 
+$ docker run -d -p 8002:8002 --name myblog -e MYSQL_HOST=10.211.55.6 -e MYSQL_USER=root -e MYSQL_PASSWD=123456  myblog:v1 
 
 ## migrate
 $ docker exec -ti myblog bash
@@ -859,7 +867,7 @@ $ docker exec -ti myblog python3 manage.py createsuperuser
 ## $ docker exec -ti myblog python3 manage.py collectstatic
 ```
 
-访问172.21.51.143:8002/admin
+访问10.211.55.6:8002/admin
 
 
 
@@ -887,6 +895,14 @@ docker优势：
 | PID namespaces     | CLONE_NEWPID     | [Linux 2.6.24](http://lwn.net/Articles/259217/)              |
 | Network namespaces | CLONE_NEWNET     | [始于Linux 2.6.24 完成于 Linux 2.6.29](http://lwn.net/Articles/219794/) |
 | User namespaces    | CLONE_NEWUSER    | [始于 Linux 2.6.23 完成于 Linux 3.8](http://lwn.net/Articles/528078/) |
+
+```
+UTS 中主要包含了主机名（hostname）、域名（domainname）和一些版本信息
+Ipc namespace的作用是使划分到不同ipc namespace的进程组通信上隔离
+
+```
+
+
 
 我们知道，docker容器对于操作系统来讲其实是一个进程，我们可以通过原始的方式来模拟一下容器实现资源隔离的基本原理：
 
@@ -1431,3 +1447,11 @@ $ ip netns exec $PID ip route add default via 172.17.0.1
 
 
 
+
+
+# 常见问题
+
+1. Dockerfile的CMD和ENTROYPOINT作用和区别
+2. Dockerfile中WORKDIR有什么作用
+3. 多阶构建有什么用，经常有哪些使用场景
+4. Docker 容器之间如何实现通信
