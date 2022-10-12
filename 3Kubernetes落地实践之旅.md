@@ -1398,8 +1398,12 @@ $ cat /tmp/loap/timing
 
 ###### [Deployment](http://49.7.203.222:3000/#/kubernetes-base/practice-deployment?id=deployment)
 
-```
+```yaml
 myblog/deployment/deploy-mysql.yaml
+[root@k8s-slave1 ~]# mkdir -p myblog/deployment/
+[root@k8s-slave1 ~]# cd myblog/deployment/
+[root@k8s-slave1 deployment]# vim deploy-mysql.yaml
+--------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1431,11 +1435,6 @@ spec:
         ports:
         - containerPort: 3306
         env:
-        - name: MYSQL_USER
-          valueFrom:
-            secretKeyRef:
-              name: myblog
-              key: MYSQL_USER
         - name: MYSQL_ROOT_PASSWORD
           valueFrom:
             secretKeyRef:
@@ -1538,7 +1537,8 @@ spec:
 ###### [创建Deployment](http://49.7.203.222:3000/#/kubernetes-base/practice-deployment?id=创建deployment)
 
 ```bash
-$ kubectl create -f deploy.yaml
+$ kubectl create -f deploy-myblog.yaml  
+$ kubectl create -f deploy-mysql.yaml
 ```
 
 ###### [查看Deployment](http://49.7.203.222:3000/#/kubernetes-base/practice-deployment?id=查看deployment)
@@ -1562,8 +1562,30 @@ NAME                      READY   STATUS    RESTARTS   AGE
 myblog-7c96c9f76b-qbbg7   1/1     Running   0          109s
 mysql-85f4f65f99-w6jkj    1/1     Running   0          2m28s
 
+# 查看pod 日志  -c指定容器
+kubectl -n luffy logs mysql-56b9db9c6-jxm9b -c mysql
+# 删除deploy
+kubectl -n luffy delete deploy mysql
 # 查看replicaSet
 $ kubectl -n luffy get rs
+
+# 报错信息
+[root@k8s-master ~]# kubectl -n luffy logs mysql-56b9db9c6-vvkxx
+2022-10-12 08:39:53+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 5.7.36-1debian10 started.
+2022-10-12 08:39:54+00:00 [Note] [Entrypoint]: Switching to dedicated user 'mysql'
+2022-10-12 08:39:54+00:00 [Note] [Entrypoint]: Entrypoint script for MySQL Server 5.7.36-1debian10 started.
+2022-10-12 08:39:55+00:00 [ERROR] [Entrypoint]: MYSQL_USER="root", MYSQL_USER and MYSQL_PASSWORD are for configuring a regular user and cannot be used for the root user
+    Remove MYSQL_USER="root" and use one of the following to control the root user password:
+    - MYSQL_ROOT_PASSWORD
+    - MYSQL_ALLOW_EMPTY_PASSWORD
+    - MYSQL_RANDOM_ROOT_PASSWORD
+ # 解决  vim deploy-mysql.yaml
+         env:  # 下面内容删除
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: myblog
+              key: MYSQL_USER
 ```
 
 ###### [副本保障机制](http://49.7.203.222:3000/#/kubernetes-base/practice-deployment?id=副本保障机制)
@@ -1980,7 +2002,7 @@ coredns-d4475785-2w4hk             1/1     Running   0          4d22h   10.244.0
 coredns-d4475785-s49hq             1/1     Running   0          4d22h   10.244.0.65
 
 # 查看myblog的pod解析配置
-$ kubectl -n luffy exec -ti myblog-5c97d79cdb-j485f bash
+$ kubectl -n luffy exec -ti myblog-5c97d79cdb-j485f /bin/bash
 [root@myblog-5c97d79cdb-j485f myblog]# cat /etc/resolv.conf
 nameserver 10.96.0.10
 search luffy.svc.cluster.local svc.cluster.local cluster.local

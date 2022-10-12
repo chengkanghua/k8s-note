@@ -784,9 +784,17 @@ $ docker build . -t sample:v2 -f Dockerfile.multi
 - python3 + django + uwsgi + nginx + mysql
 - 内部服务端口8002
 
+```
+git clone https://gitee.com/chengkanghua/python-demo.git
+cd python-demo
+vim Dockerfile
+```
+
+
+
 ###### [容器化Django项目](http://49.7.203.222:3000/#/docker/containerization?id=容器化django项目)
 
-*dockerfiles/myblog/Dockerfile*
+*python-demo/Dockerfile*
 
 ```dockerfile
 # This my first django Dockerfile
@@ -859,6 +867,7 @@ $ docker exec -ti myblog bash
 #/ python3 manage.py makemigrations
 #/ python3 manage.py migrate
 #/ python3 manage.py createsuperuser
+#/ python3 manage.py collectstatic
 
 ## 创建超级用户
 $ docker exec -ti myblog python3 manage.py createsuperuser
@@ -867,7 +876,14 @@ $ docker exec -ti myblog python3 manage.py createsuperuser
 ## $ docker exec -ti myblog python3 manage.py collectstatic
 ```
 
-访问10.211.55.6:8002/admin
+访问http://10.211.55.6:8002/admin
+
+```bash
+docker tag myblog:v1 192.168.31.113:5000/myblog:v1   
+docker push 192.168.31.113:5000/myblog:v1
+```
+
+
 
 
 
