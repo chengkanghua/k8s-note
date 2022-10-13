@@ -760,7 +760,7 @@ docker run -it --cpu-period=50000 --cpu-quota=25000 ubuntu:16.04 /bin/bash
 
 # myblog 改造及优化
 
-###### [yaml优化](http://49.7.203.222:3000/#/kubernetes-base/demo-optimization?id=yaml优化)
+## [yaml优化](http://49.7.203.222:3000/#/kubernetes-base/demo-optimization?id=yaml优化)
 
 目前完善后的yaml，`myblog/one-pod/pod-completed.yaml`
 
@@ -851,9 +851,9 @@ spec:
 - 考虑真实的使用场景，像数据库这类中间件，是作为公共资源，为多个项目提供服务，不适合和业务容器绑定在同一个Pod中，因为业务容器是经常变更的，而数据库不需要频繁迭代
 - yaml的环境变量中存在敏感信息（账号、密码），存在安全隐患
 
-解决问题一，需要拆分yaml
+## 解决问题一，需要拆分yaml
 
-```
+```yaml
 myblog/two-pod/mysql.yaml
 apiVersion: v1
 kind: Pod
@@ -972,7 +972,7 @@ mysql    1/1     Running   0          52s   172.21.51.67   k8s-slave1
 $ curl 10.244.1.152:8002/blog/index/
 ```
 
-解决问题二，环境变量中敏感信息带来的安全隐患
+## 解决问题二，环境变量中敏感信息带来的安全隐患
 
 为什么要统一管理环境变量
 
@@ -1202,6 +1202,11 @@ spec:
 ```
 
 在部署不同的环境时，pod的yaml无须再变化，只需要在每套环境中维护一套ConfigMap和Secret即可。但是注意configmap和secret不能跨namespace使用，且更新后，pod内的env不会自动更新，重建后方可更新。
+
+```bash
+kubectl create -f mysql-with-config.yaml
+kubectl create -f myblog-with-config.yaml
+```
 
 
 
@@ -1556,12 +1561,20 @@ mysql    1/1     1            1           2d11h
   * `AVAILABLE`显示应用程序可供用户使用的副本数。
   * `AGE` 显示应用程序运行的时间量。
 
+# 删除deploy 查看deploy
+# kubectl -n luffy delete deploy myblog
+# kubectl -n luffy get deploy
+
 # 查看pod
 $ kubectl -n luffy get po
 NAME                      READY   STATUS    RESTARTS   AGE
 myblog-7c96c9f76b-qbbg7   1/1     Running   0          109s
 mysql-85f4f65f99-w6jkj    1/1     Running   0          2m28s
 
+# 查看pod的标签
+kubectl -n luffy get pod  --show-labels
+# 删除pod 后面可以跟多个pod
+kubectl -n luffy delete pod myblog-5cbd66856c-f9hk6 mysql-864b4c85b5-tcpwg
 # 查看pod 日志  -c指定容器
 kubectl -n luffy logs mysql-56b9db9c6-jxm9b -c mysql
 # 删除deploy
@@ -1595,6 +1608,7 @@ controller实时检测pod状态，并保障副本数一直处于期望的值。
 ```bash
 ## 删除pod，观察pod状态变化
 $ kubectl -n luffy delete pod myblog-7c96c9f76b-qbbg7
+# kubectl -n luffy delete pod  myblog-7c96c9f76b-qbbg7 --force --grace-period=0
 
 # 观察pod
 $ kubectl -n luffy  get pods -o wide
@@ -2058,7 +2072,7 @@ myblog      ClusterIP   10.99.174.93     <none>        80/TCP         102m
 myblog-np   NodePort    10.105.228.101   <none>        80:30647/TCP   4s
 mysql       ClusterIP   10.108.214.84    <none>        3306/TCP       77m
 
-#集群内每个节点的NodePort端口都会进行监听
+# 集群内每个节点的NodePort端口都会进行监听
 $ curl 172.21.51.143:30647/blog/index/
 我的博客列表
 $ curl 172.21.51.143:30647/blog/index/

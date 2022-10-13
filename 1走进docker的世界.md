@@ -349,7 +349,7 @@ nginx         alpine              377c0837328f        2 weeks ago         19.7MB
    Get https://172.21.51.143:5000/v2/: http: server gave HTTP response to HTTPS client
    ## docker默认不允许向http的仓库地址推送，如何做成https的，参考：https://docs.docker.com/registry/deploying/#run-an-externally-accessible-registry
    ## 我们没有可信证书机构颁发的证书和域名，自签名证书需要在每个节点中拷贝证书文件，比较麻烦，因此我们通过配置daemon的方式，来跳过证书的验证：
-   $ cat /etc/docker/daemon.json
+   $ cat /etc/docker/daemon.json    # 需要下载的机器上都要配置
    {
      "registry-mirrors": [
        "https://8xpk5wnt.mirror.aliyuncs.com"
@@ -879,6 +879,11 @@ $ docker exec -ti myblog python3 manage.py createsuperuser
 访问http://10.211.55.6:8002/admin
 
 ```bash
+# 将正在运行的容器保持成镜像
+[root@k8s-slave2 ~]# docker commit myblog  192.168.31.113:5000/myblog:v1.1
+sha256:ad705fa61e112e36bc67bd4ff566b93d5950ac65733a7de07c39fbbde634ceca
+[root@k8s-slave2 ~]# docker push 192.168.31.113:5000/myblog:v1.1
+# 镜像重新打tag
 docker tag myblog:v1 192.168.31.113:5000/myblog:v1   
 docker push 192.168.31.113:5000/myblog:v1
 ```
