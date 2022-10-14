@@ -1777,6 +1777,8 @@ $ kubectl delete -f deploy-myblog.yaml    ## 方便演示到具体效果，删�
 $ kubectl apply -f deploy-myblog.yaml --record
 
 $ kubectl -n luffy set image deploy myblog myblog=172.21.51.143:5000/myblog:v2 --record=true
+# 编辑模式后面加--record 也可以
+$ kubectl -n luffy edit deploy myblog —record
 ```
 
 查看deployment更新历史：
@@ -1900,9 +1902,10 @@ $ kd get svc myblog
 NAME   TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
 myblog   ClusterIP   10.99.174.93   <none>        80/TCP    13m
 $ curl 10.99.174.93/blog/index/
+$ elinks 10.99.174.93/blog/index/
 ```
 
-为mysql服务创建service：
+为mysql服务创建service： svc-mysql.yaml
 
 ```yaml
 apiVersion: v1
@@ -1923,8 +1926,12 @@ spec:
 访问mysql：
 
 ```bash
+$ kubectl create -f svc-mysql.yaml
 $ kd get svc mysql
 mysql    ClusterIP   10.108.214.84   <none>        3306/TCP   3s
+[root@k8s-master deployment]# kd get endpoints mysql
+NAME    ENDPOINTS             AGE
+mysql   10.108.214.84:3306   51s
 $ curl 10.108.214.84:3306
 ```
 
@@ -1954,7 +1961,7 @@ $ kd get svc
 NAME     TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
 myblog   ClusterIP   10.99.174.93    <none>        80/TCP     59m
 mysql    ClusterIP   10.108.214.84   <none>        3306/TCP   35m
-
+$ kd get pod -owide
 # 进入myblog容器
 $ kd exec -ti myblog-5c97d79cdb-j485f bash
 [root@myblog-5c97d79cdb-j485f myblog]# curl mysql:3306
@@ -1996,13 +2003,16 @@ metadata:
 data:
   MYSQL_HOST: "mysql"    # 此处替换为mysql
   MYSQL_PORT: "3306"
+-------------------------------------------
+$ kubectl apply -f configmap.yaml
 ```
 
 应用修改：
 
 ```bash
-$ kubectl delete -f deployment-mysql.yaml
-
+$ kubectl delete -f deploy-mysql.yaml
+$ kubectl create -f deploy-mysql.yaml
+$ kubectl -n luffy get deploy
 ## myblog不用动，会自动因健康检测不过而重启
 ```
 
@@ -2029,7 +2039,7 @@ kube-dns   ClusterIP   10.96.0.10   <none>        53/UDP,53/TCP   51d
 
 ## 启动pod的时候，会把kube-dns服务的cluster-ip地址注入到pod的resolve解析配置中，同时添加对应的namespace的search域。 因此跨namespace通过service name访问的话，需要添加对应的namespace名称，
 service_name.namespace
-$ kubectl get svc
+$ kubectl get svc   #  kubectl -n defatult get svc
 NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
 kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP   26h
 ```
@@ -2153,8 +2163,9 @@ $ kubectl -n kube-system edit cm kube-proxy
 # 重建kube-proxy
 $ kubectl -n kube-system get po |grep kube-proxy|awk '{print $1}'|xargs kubectl -n kube-system delete po
 
+$ kubectl -n kube-system get po
 # 查看日志，确认使用了ipvs模式
-$ kubectl -n kube-system logs -f 
+$ kubectl -n kube-system logs -f kube-proxy-2rd4h
 I0605 08:47:52.334298       1 node.go:136] Successfully retrieved node IP: 172.21.51.143
 I0605 08:47:52.334430       1 server_others.go:142] kube-proxy node IP is an IPv4 address (172.21.51.143), assume IPv4 operation
 I0605 08:47:52.766314       1 server_others.go:258] Using ipvs Proxier.
