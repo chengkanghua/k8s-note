@@ -2211,7 +2211,7 @@ Ingress-nginx是7层的负载均衡器 ，负责统一管理外部对k8s cluster
             service:
               name: service1
               port:
-              number: 80
+                number: 80
     - host: "bar.foo.com"
       http:
         paths:
@@ -2230,14 +2230,24 @@ Ingress-nginx是7层的负载均衡器 ，负责统一管理外部对k8s cluster
 
 ###### [实现逻辑](http://49.7.203.222:3000/#/kubernetes-base/ingress?id=实现逻辑)
 
-1）ingress controller通过和kubernetes api交互，动态的去感知集群中ingress规则变化 2）然后读取ingress规则(规则就是写明了哪个域名对应哪个service)，按照自定义的规则，生成一段nginx配置 3）再写到nginx-ingress-controller的pod里，这个Ingress controller的pod里运行着一个Nginx服务，控制器把生成的nginx配置写入/etc/nginx/nginx.conf文件中 4）然后reload一下使配置生效。以此达到域名分别配置和动态更新的问题。
+1）ingress controller通过和kubernetes api交互，动态的去感知集群中ingress规则变化 
+
+2）然后读取ingress规则(规则就是写明了哪个域名对应哪个service)，按照自定义的规则，生成一段nginx配置
+
+ 3）再写到nginx-ingress-controller的pod里，这个Ingress controller的pod里运行着一个Nginx服务，控制器把生成的nginx配置写入/etc/nginx/nginx.conf文件中 
+
+4）然后reload一下使配置生效。以此达到域名分别配置和动态更新的问题。
 
 ###### [安装](http://49.7.203.222:3000/#/kubernetes-base/ingress?id=安装)
 
 [官方文档](https://github.com/kubernetes/ingress-nginx/blob/master/docs/deploy/index.md)
 
+
+
 ```bash
+# 下载地址需要梯子， 内容放到结尾了
 $ wget https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.30.0/deploy/static/mandatory.yaml
+# vim 命令行模式输入 :set paste  解决粘贴多行乱序问题
 ## 或者使用myblog/deployment/ingress/mandatory.yaml
 ## 修改部署节点
 $ grep -n5 nodeSelector mandatory.yaml
@@ -2259,13 +2269,24 @@ $ grep -n5 nodeSelector mandatory.yaml
 ```bash
 # 为k8s-master节点添加label
 $ kubectl label node k8s-master ingress=true
-
+  
 $ kubectl apply -f mandatory.yaml
+
+[root@k8s-master ~]# kubectl get pod -n ingress-nginx
+NAME                                        READY   STATUS    RESTARTS   AGE
+nginx-ingress-controller-55dd6f8d7b-zfjwp   0/1     Pending   0          8m35s
+[root@k8s-master ~]# kubectl -n ingress-nginx describe nginx-ingress-controller-55dd6f8d7b-zfjwp
+[root@k8s-master ~]# kubectl get node --show-labels |grep ingress
+[root@k8s-master ~]# kubectl label node k8s-master ingress=true
+[root@k8s-master ~]# kubectl get pod -n ingress-nginx -owide
+NAME                                        READY   STATUS    RESTARTS   AGE   IP              NODE         NOMINATED NODE   READINESS GATES
+nginx-ingress-controller-55dd6f8d7b-zfjwp   1/1     Running   0          18m   192.168.31.20   k8s-master   <none>           <none>
 ```
 
 使用示例：`myblog/deployment/ingress.yaml`
 
 ```yaml
+# vim myblog.ing.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -2283,11 +2304,35 @@ spec:
             name: myblog
             port:
               number: 80
+        
+$ kubectl apply -f myblog.ing.yaml
+[root@k8s-master deployment]# kubectl -n luffy get ing
+NAME     CLASS    HOSTS              ADDRESS   PORTS   AGE
+myblog   <none>   myblog.luffy.com             80      54s
+[root@k8s-master deployment]# kubectl -n luffy describe ingress myblog
+Name:             myblog
+Namespace:        luffy
+Address:
+Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
+Rules:
+  Host              Path  Backends
+  ----              ----  --------
+  myblog.luffy.com
+                    /   myblog:80 (10.244.1.26:8002,10.244.1.27:8002,10.244.1.28:8002)
+Annotations:        <none>
+Events:
+  Type    Reason  Age   From                      Message
+  ----    ------  ----  ----                      -------
+  Normal  CREATE  115s  nginx-ingress-controller  Ingress luffy/myblog
+  # 本机，添加如下hosts记录来演示效果
+  $ echo '192.168.31.20 myblog.luffy.com' >> /etc/hosts
+  $ elinks myblog.luffy.com/blog/index
 ```
 
 ingress-nginx动态生成upstream配置：
 
 ```yaml
+$ kubectl -n ingress-nginx get pod
 $ kubectl -n ingress-nginx exec -ti nginx-ingress-xxxxxxx bash
 # ps aux
 # cat /etc/nginx/nginx.conf|grep myblog -A10 -B1
@@ -2379,9 +2424,11 @@ $ openssl req -x509 -nodes -days 2920 -newkey rsa:2048 -keyout tls.key -out tls.
 
 # 证书信息保存到secret对象中，ingress-nginx会读取secret对象解析出证书加载到nginx配置中
 $ kubectl -n luffy create secret tls tls-myblog --key tls.key --cert tls.crt
+# 查看
+$ kubectl -n luffy get secret
 ```
 
-修改yaml
+修改yaml       vim myblog.ing.yaml
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -2409,9 +2456,24 @@ spec:
 
 然后，访问 https://myblog.luffy.com/blog/index/
 
+windows 修改hosts
+
+```
+C:\Windows\System32\drivers\etc
+# hosts 属性 --》安全 --编辑--》添加当前用户 勾选 完全控制。
+
+192.168.31.20 myblog.luffy.com
+```
+
+
+
 ###### [常用注解说明](http://49.7.203.222:3000/#/kubernetes-base/ingress?id=常用注解说明)
 
 nginx端存在很多可配置的参数，通常这些参数在ingress的定义中被放在annotations中实现，如下为常用的一些：
+
+> 不加http请求默认会有308跳转https  加了之后没有308跳转了
+
+ vim myblog.ing.yaml
 
 ```yaml
 apiVersion: networking.k8s.io/v1
@@ -2442,6 +2504,14 @@ spec:
     secretName: tls-myblog
 ```
 
+```
+# 不用加host的curl 请求测试
+# Host：指定域名 
+ curl -HHost:myblog.luffy.com 192.168.31.20/admin/login -v
+```
+
+
+
 ###### [多路径转发及重写的实现](http://49.7.203.222:3000/#/kubernetes-base/ingress?id=多路径转发及重写的实现)
 
 1. 多path转发示例：
@@ -2449,15 +2519,14 @@ spec:
    目标：
 
 ```none
-myblog.luffy.com -> 172.21.51.143 -> /foo/aaa   service1:4200/foo/aaa
-                                      /bar   service2:8080
-                                      /         myblog:80/
+bookstore.luffy.com -> 192.168.31.20 -> /reviews   reviews:9080 (10.244.2.23:9080)
+                                      /details   details:9080 (10.244.1.29:9080)
 ```
 
  实现：
 
 ```bash
-$ cat detail.dpl.yaml
+cat > detail.dpl.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -2480,8 +2549,8 @@ spec:
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 9080
-
-$ cat detail.svc.yaml
+EOF
+cat > detail.svc.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -2494,9 +2563,19 @@ spec:
     name: http
   selector:
     app: details
-    
-        
-# reviews.dpl.yaml
+EOF 
+----------------------------------
+[root@k8s-master ingress]# kubectl create -f .
+deployment.apps/details created
+service/details created
+[root@k8s-master ingress]# kubectl get po -owide
+NAME                       READY   STATUS    RESTARTS   AGE     IP            NODE         NOMINATED NODE   READINESS GATES
+details-7cd4cb8d54-28tcx   1/1     Running   0          5m57s   10.244.1.29   k8s-slave2   <none>           <none>
+test-nginx                 1/1     Running   6          3d1h    10.244.2.20   k8s-slave1   <none>           <none>
+[root@k8s-master ingress]# curl 10.244.1.29:9080/details/0
+{"id":0,"author":"William Shakespeare","year":1595,"type":"paperback","pages":200,"publisher":"PublisherA","language":"English","ISBN-10":"1234567890","ISBN-13":"123-1234567890"}
+--------------------------------------
+cat > reviews.dpl.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -2522,8 +2601,8 @@ spec:
           value: "/tmp/logs"
         ports:
         - containerPort: 9080
-
-$ cat reviews.svc.yaml
+EOF
+cat > reviews.svc.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -2536,12 +2615,24 @@ spec:
     name: http
   selector:
     app: reviews
+EOF
+-----------------------------
+[root@k8s-master ingress]# kubectl apply -f .
+service/details configured
+deployment.apps/reviews created
+[root@k8s-master ingress]# kubectl get po -owide
+NAME                       READY   STATUS    RESTARTS   AGE    IP            NODE         NOMINATED NODE   READINESS GATES
+details-7cd4cb8d54-28tcx   1/1     Running   0          16m    10.244.1.29   k8s-slave2   <none>           <none>
+reviews-75d7bdcc65-vwjw8   1/1     Running   0          16s    10.244.2.23   k8s-slave1   <none>           <none>
+test-nginx                 1/1     Running   6          3d1h   10.244.2.20   k8s-slave1   <none>           <none>
+[root@k8s-master ingress]# curl 10.244.2.23:9080/reviews/0
+{"id": "0","reviews": [{  "reviewer": "Reviewer1",  "text": "An extremely entertaining play by Shakespeare. The slapstick humour is refreshing!", "rating": {"error": "Ratings service is currently unavailable"}},{  "reviewer": "Reviewer2",  "text": "Absolutely fun and entertaining. The play lacks thematic depth when compared to other plays by Shakespeare.", "rating": {"error": "Ratings service is currently unavailable"}}]}
 ```
 
 准备Ingress文件
 
 ```yaml
-# bookstore.ingress.yaml
+cat > bookstore.ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -2566,21 +2657,59 @@ spec:
             name: details
             port:
               number: 9080
+EOF
 ```
+
+```bash
+# 测试
+[root@k8s-master ingress]# kubectl get svc
+[root@k8s-master ingress]# kubectl create -f bookstore.ingress.yaml
+ingress.networking.k8s.io/bookstore created
+[root@k8s-master ingress]# kubectl get ing
+NAME        CLASS    HOSTS                 ADDRESS   PORTS   AGE
+bookstore   <none>   bookstore.luffy.com             80      6s
+[root@k8s-master ingress]# kubectl describe ing bookstore
+Name:             bookstore
+Namespace:        default
+Address:
+Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
+Rules:
+  Host                 Path  Backends
+  ----                 ----  --------
+  bookstore.luffy.com
+                       /reviews   reviews:9080 (10.244.2.23:9080)
+                       /details   details:9080 (10.244.1.29:9080)
+Annotations:           <none>
+Events:
+  Type    Reason  Age   From                      Message
+  ----    ------  ----  ----                      -------
+  Normal  CREATE  26s   nginx-ingress-controller  Ingress default/bookstore
+-----验证
+curl -HHost:bookstore.luffy.com 192.168.31.20/reviews/0
+curl 10.244.2.23:9080/reviews/0
+curl -HHost:bookstore.luffy.com 192.168.31.20/details/0
+curl 10.244.1.29:9080/details/0
+```
+
+
+
+
+
 
 1. URL重写
 
    目标：
 
    ```
-   bookstore.luffy.com -> 172.21.51.67 -> /api/reviews   -> reviews service
+   bookstore.luffy.com -> 192.168.31.20 -> /api/reviews   -> reviews service
                                        /details   -> details service
    ```
 
    实现：
 
    ```powershell
-   $ cat bookstore.reviews.ingress.yaml
+   # 在分界符EOF前添加反斜杠\，或者用单引号、双引号括起来; 防止变量替换
+   cat > bookstore.reviews.ingress.yaml <<\EOF
    apiVersion: networking.k8s.io/v1
    kind: Ingress
    metadata:
@@ -2600,8 +2729,34 @@ spec:
                name: reviews
                port:
                  number: 9080
+   EOF
+   ----------------
+   [root@k8s-master ingress]# kubectl delete -f bookstore.ingress.yaml
+   [root@k8s-master ingress]# kubectl apply -f bookstore.reviews.ingress.yaml
+   [root@k8s-master ingress]# kubectl get ing
+   NAME                CLASS    HOSTS                 ADDRESS   PORTS   AGE
+   bookstore-reviews   <none>   bookstore.luffy.com             80      17m
+   [root@k8s-master ingress]# kubectl describe ing bookstore-reviews
+   Name:             bookstore-reviews
+   Namespace:        default
+   Address:
+   Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
+   Rules:
+     Host                 Path  Backends
+     ----                 ----  --------
+     bookstore.luffy.com
+                          /api/reviews/(.*)   reviews:9080 (10.244.2.23:9080)
+   Annotations:           nginx.ingress.kubernetes.io/rewrite-target: /reviews/$1
+   Events:
+     Type    Reason  Age    From                      Message
+     ----    ------  ----   ----                      -------
+     Normal  CREATE  17m    nginx-ingress-controller  Ingress default/bookstore-reviews
+     Normal  UPDATE  8m16s  nginx-ingress-controller  Ingress default/bookstore-reviews
+   [root@k8s-master ingress]# #curl bookstore.luffy.com/api/reviews/0 ==> 10.244.2.23:9080/reviews/0
+   [root@k8s-master ingress]# curl -HHost:bookstore.luffy.com 192.168.31.20/api/reviews/0
    
-   $ cat bookstore.details.ingress.yaml
+   ----------------
+   cat > bookstore.details.ingress.yaml <<EOF
    apiVersion: networking.k8s.io/v1
    kind: Ingress
    metadata:
@@ -2619,7 +2774,34 @@ spec:
                name: details
                port:
                  number: 9080
-                 
+   EOF
+   ---------------------------------
+   [root@k8s-master ingress]# kubectl apply -f bookstore.details.ingress.yaml
+   ingress.networking.k8s.io/bookstore-details created
+   [root@k8s-master ingress]# kubectl get ing
+   NAME                CLASS    HOSTS                 ADDRESS   PORTS   AGE
+   bookstore-details   <none>   bookstore.luffy.com             80      21s
+   bookstore-reviews   <none>   bookstore.luffy.com             80      22m
+   [root@k8s-master ingress]# kubectl describe ing bookstore-details
+   Name:             bookstore-details
+   Namespace:        default
+   Address:
+   Default backend:  default-http-backend:80 (<error: endpoints "default-http-backend" not found>)
+   Rules:
+     Host                 Path  Backends
+     ----                 ----  --------
+     bookstore.luffy.com
+                          /details   details:9080 (10.244.1.29:9080)
+   Annotations:           <none>
+   Events:
+     Type    Reason  Age   From                      Message
+     ----    ------  ----  ----                      -------
+     Normal  CREATE  57s   nginx-ingress-controller  Ingress default/bookstore-details
+   -------------------------------
+   [root@k8s-master ingress]# #curl bookstore.luffy.com/details ==> 10.244.1.29:9080/details
+   [root@k8s-master ingress]# curl -HHost:bookstore.luffy.com 192.168.31.20/details/0
+   [root@k8s-master ingress]# curl 10.244.1.29:9080/details/0
+   
    ```
 
 
@@ -2642,3 +2824,307 @@ spec:
 12. 介绍了Service的实现原理，通过kube-proxy利用iptables或者ipvs维护服务访问规则，实现虚拟IP转发到具体Pod的需求
 13. 为了实现集群外使用域名访问myblog，因此引入Ingress资源，通过定义访问规则，实现七层代理
 14. 考虑真实的场景，对Ingress的使用做了拓展，介绍多path转发及nginx URL重写的实现
+
+
+
+
+
+mandatory.yaml
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+
+---
+
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: nginx-configuration
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: tcp-services
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: udp-services
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-ingress-serviceaccount
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: nginx-ingress-clusterrole
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - endpoints
+      - nodes
+      - pods
+      - secrets
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - "extensions"
+      - "networking.k8s.io"
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "extensions"
+      - "networking.k8s.io"
+    resources:
+      - ingresses/status
+    verbs:
+      - update
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  name: nginx-ingress-role
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+      - pods
+      - secrets
+      - namespaces
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    resourceNames:
+      # Defaults to "<election-id>-<ingress-class>"
+      # Here: "<ingress-controller-leader>-<nginx>"
+      # This has to be adapted if you change either parameter
+      # when launching the nginx-ingress-controller.
+      - "ingress-controller-leader-nginx"
+    verbs:
+      - get
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+    verbs:
+      - get
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: nginx-ingress-role-nisa-binding
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nginx-ingress-role
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: nginx-ingress-clusterrole-nisa-binding
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nginx-ingress-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-ingress-controller
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ingress-nginx
+      app.kubernetes.io/part-of: ingress-nginx
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ingress-nginx
+        app.kubernetes.io/part-of: ingress-nginx
+      annotations:
+        prometheus.io/port: "10254"
+        prometheus.io/scrape: "true"
+    spec:
+      # wait up to five minutes for the drain of connections
+      terminationGracePeriodSeconds: 300
+      serviceAccountName: nginx-ingress-serviceaccount
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: nginx-ingress-controller
+          image: quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.30.0
+          args:
+            - /nginx-ingress-controller
+            - --configmap=$(POD_NAMESPACE)/nginx-configuration
+            - --tcp-services-configmap=$(POD_NAMESPACE)/tcp-services
+            - --udp-services-configmap=$(POD_NAMESPACE)/udp-services
+            - --publish-service=$(POD_NAMESPACE)/ingress-nginx
+            - --annotations-prefix=nginx.ingress.kubernetes.io
+          securityContext:
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+            # www-data -> 101
+            runAsUser: 101
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 10
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /healthz
+              port: 10254
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 10
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /wait-shutdown
+
+---
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: ingress-nginx
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+spec:
+  limits:
+  - min:
+      memory: 90Mi
+      cpu: 100m
+    type: Container
+
+```
+
