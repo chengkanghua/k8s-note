@@ -2829,6 +2829,8 @@ curl 10.244.1.29:9080/details/0
 
 
 
+![image-20221016171726238](3Kubernetes落地实践之旅.assets/image-20221016171726238.png)
+
 mandatory.yaml
 
 ```yaml

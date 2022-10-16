@@ -5,7 +5,12 @@
 拷贝etcdctl命令行工具：
 
 ```bash
-$ docker cp etcd_container:/usr/local/bin/etcdctl /usr/bin/etcdctl
+[root@k8s-master manifests]# docker ps |grep etcd
+823cb3a16fcd   0369cf4303ff                                                     "etcd --advertise-cl…"   27 hours ago   Up 27 hours             k8s_etcd_etcd-k8s-master_kube-system_59bcab4f5ce01027b607b7a978cd16b6_3
+c4e6a0bc4fcb   registry.aliyuncs.com/google_containers/pause:3.4.1              "/pause"                 27 hours ago   Up 27 hours             k8s_POD_etcd-k8s-master_kube-system_59bcab4f5ce01027b607b7a978cd16b6_3
+[root@k8s-master manifests]# docker cp 823cb3a16fcd:/usr/local/bin/etcdctl /usr/bin/etcdctl
+
+# docker cp etcd_container:/usr/local/bin/etcdctl /usr/bin/etcdctl
 ```
 
 查看etcd集群的成员节点：
@@ -44,6 +49,7 @@ $  etcdctl get / --prefix --keys-only
 
 ```bash
 $ etcdctl get /registry/pods/jenkins/sonar-postgres-7fc5d748b6-gtmsb
+$ etcdctl get /registry/namespaces/luffy
 ```
 
 list-watch:
@@ -62,6 +68,15 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 恢复快照：
 
 1. 停止etcd和apiserver
+
+    ```bash
+    [root@k8s-master manifests]# ll  /etc/kubernetes/manifests  	# 临时移走这两个文件
+    总用量 16
+    -rw-------. 1 root root 2187 10月 12 08:37 etcd.yaml
+    -rw-------. 1 root root 3330 10月 12 08:37 kube-apiserver.yaml
+    ```
+
+
 
 2. 移走当前数据目录
 
@@ -82,6 +97,22 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 - namespace删除问题
 
   很多情况下，会出现namespace删除卡住的问题，此时可以通过操作etcd来删除数据：
+
+```BASH
+$ kubectl get ns
+NAME                           STATUS                    AGE
+business-java-backend4h99k   Terminationg          2d22h
+$ etcdctl get / --prefix=true --key-only|grep business-java-backend4h99k
+.
+..
+...
+....
+$ etcd del .
+$ etcd del ..
+$ etcd del ...
+$ etcd del ....
+$ kubectl get ns   # 再次查看已没有business-java-backend4h99k
+```
 
 
 
