@@ -923,6 +923,12 @@ $ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6InBtQUZfRl8ycC0
 
 ![img](4Kubernetes进阶实践.assets/AUTH.jpg)
 
+---
+
+![image-20221016203546263](4Kubernetes进阶实践.assets/image-20221016203546263.png)
+
+
+
 ###### [创建用户认证授权的kubeconfig文件](http://49.7.203.222:3000/#/kubernetes-advanced/auth?id=创建用户认证授权的kubeconfig文件)
 
 签发证书对：
