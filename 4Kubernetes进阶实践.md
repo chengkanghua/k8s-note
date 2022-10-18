@@ -21,14 +21,19 @@ $ etcdctl --endpoints=https://[127.0.0.1]:2379 --cacert=/etc/kubernetes/pki/etcd
 
 $ alias etcdctl='etcdctl --endpoints=https://[127.0.0.1]:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key'
 
-$ etcdctl member list -w table
+$ etcdctl member list -w table   # 查看etcd成员列表  table表格显示
 ```
 
 查看etcd集群节点状态：
 
 ```bash
 $ etcdctl endpoint status -w table
-
++--------------------------+------------------+---------+---------+-----------+------------+-----------+------------+--------------------+--------+
+|         ENDPOINT         |        ID        | VERSION | DB SIZE | IS LEADER | IS LEARNER | RAFT TERM | RAFT INDEX | RAFT APPLIED INDEX | ERRORS |
++--------------------------+------------------+---------+---------+-----------+------------+-----------+------------+--------------------+--------+
+| https://[127.0.0.1]:2379 | 1230b008312e9125 |  3.4.13 |  3.9 MB |      true |      false |         7 |     159386 |             159386 |        |
++--------------------------+------------------+---------+---------+-----------+------------+-----------+------------+--------------------+--------+
+# etcd 是基于RAFT协议实现的分布式一致性数据库
 $ etcdctl endpoint health -w table
 ```
 
@@ -42,7 +47,10 @@ $ etcdctl get luffy
 查看所有key值：
 
 ```bash
+# 匹配以/开头的 只显示key不显示value
 $  etcdctl get / --prefix --keys-only
+$  etcdctl get /registery/deployments --prefix --keys-only
+$  etcdctl get /registery/pod --prefix --keys-only
 ```
 
 查看具体的key对应的数据：
@@ -55,13 +63,14 @@ $ etcdctl get /registry/namespaces/luffy
 list-watch:
 
 ```bash
-$ etcdctl watch /luffy/ --prefix
+$ etcdctl watch /luffy/ --prefix   # 阻塞住了， 数据操作改动的数据会显示出来，监听/luffy 下的数据
 $ etcdctl put /luffy/key1 val1
 ```
 
 添加定时任务做数据快照（重要！）
 
 ```bash
+# 备份数据在当前目录
 $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 ```
 
@@ -70,7 +79,7 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 1. 停止etcd和apiserver
 
     ```bash
-    [root@k8s-master manifests]# ll  /etc/kubernetes/manifests  	# 临时移走这两个文件
+    [root@k8s-master manifests]# ll  /etc/kubernetes/manifests  	# 临时移走这两个文件， 恢复快照后在移动回来
     总用量 16
     -rw-------. 1 root root 2187 10月 12 08:37 etcd.yaml
     -rw-------. 1 root root 3330 10月 12 08:37 kube-apiserver.yaml
@@ -78,7 +87,7 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 
 
 
-2. 移走当前数据目录
+2. 移走etcd当前数据目录
 
    ```bash
    $ mv /var/lib/etcd/ /tmp
@@ -88,6 +97,21 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 
    ```bash
    $ etcdctl snapshot restore `hostname`-etcd_`date +%Y%m%d%H%M`.db --data-dir=/var/lib/etcd/
+   
+   # 实战
+   [root@k8s-master manifests]# etcdctl snapshot restore ~/k8s-master-etcd_202210171504.db --data-dir=/var/lib/etcd
+   Error: data-dir "/var/lib/etcd" exists
+   [root@k8s-master manifests]# rm -rf /var/lib/etcd
+   [root@k8s-master manifests]# etcdctl snapshot restore ~/k8s-master-etcd_202210171504.db --data-dir=/var/lib/etcd
+   {"level":"info","ts":1665992378.418471,"caller":"snapshot/v3_snapshot.go:296","msg":"restoring snapshot","path":"/root/k8s-master-etcd_202210171504.db","wal-dir":"/var/lib/etcd/member/wal","data-dir":"/var/lib/etcd","snap-dir":"/var/lib/etcd/member/snap"}
+   {"level":"info","ts":1665992378.4408987,"caller":"mvcc/kvstore.go:380","msg":"restored last compact revision","meta-bucket-name":"meta","meta-bucket-name-key":"finishedCompactRev","restored-compact-revision":132393}
+   {"level":"info","ts":1665992378.445238,"caller":"membership/cluster.go:392","msg":"added member","cluster-id":"cdf818194e3a8c32","local-member-id":"0","added-peer-id":"8e9e05c52164694d","added-peer-peer-urls":["http://localhost:2380"]}
+   {"level":"info","ts":1665992378.448043,"caller":"snapshot/v3_snapshot.go:309","msg":"restored snapshot","path":"/root/k8s-master-etcd_202210171504.db","wal-dir":"/var/lib/etcd/member/wal","data-dir":"/var/lib/etcd","snap-dir":"/var/lib/etcd/member/snap"}
+   [root@k8s-master manifests]# ls /var/lib/etcd/
+   member
+   [root@k8s-master manifests]# ls /var/lib/etcd/member/
+   snap  wal
+   [root@k8s-master manifests]#
    ```
 
 4. 集群恢复
@@ -97,6 +121,8 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 - namespace删除问题
 
   很多情况下，会出现namespace删除卡住的问题，此时可以通过操作etcd来删除数据：
+  
+  状态一直显示 Terminationg 
 
 ```BASH
 $ kubectl get ns
@@ -107,7 +133,7 @@ $ etcdctl get / --prefix=true --key-only|grep business-java-backend4h99k
 ..
 ...
 ....
-$ etcd del .
+$ etcd del .  #复制上面查询到的数据
 $ etcd del ..
 $ etcd del ...
 $ etcd del ....
@@ -115,6 +141,44 @@ $ kubectl get ns   # 再次查看已没有business-java-backend4h99k
 ```
 
 
+
+#### 问题 组件状态不健康
+
+```bash
+[root@k8s-master ~]# kubectl get cs   # 查看组件状态。scheduler  controller-manager 是unhealthy
+Warning: v1 ComponentStatus is deprecated in v1.19+
+NAME                 STATUS      MESSAGE                                                                                       ERROR
+scheduler            Unhealthy   Get "http://127.0.0.1:10251/healthz": dial tcp 127.0.0.1:10251: connect: connection refused
+controller-manager   Unhealthy   Get "http://127.0.0.1:10252/healthz": dial tcp 127.0.0.1:10252: connect: connection refused
+etcd-0               Healthy     {"health":"true"}
+[root@k8s-master ~]# kubectl get pods -A    # 查看所有pod运行状态
+[root@k8s-master ~]# docker images   #查看所有images 版本
+REPOSITORY                                                        TAG        IMAGE ID       CREATED         SIZE
+rancher/mirrored-flannelcni-flannel                               v0.19.2    8b675dda11bb   6 weeks ago     62.3MB
+rancher/mirrored-flannelcni-flannel-cni-plugin                    v1.1.0     fcecffc7ad4a   4 months ago    8.09MB
+rancher/mirrored-flannelcni-flannel                               v0.16.1    404fc3ab6749   9 months ago    69.9MB
+registry.aliyuncs.com/google_containers/kube-apiserver            v1.21.5    7b2ac941d4c3   13 months ago   126MB
+registry.aliyuncs.com/google_containers/kube-proxy                v1.21.5    e08abd2be730   13 months ago   104MB
+registry.aliyuncs.com/google_containers/kube-controller-manager   v1.21.5    184ef4d127b4   13 months ago   120MB
+registry.aliyuncs.com/google_containers/kube-scheduler            v1.21.5    8e60ea3644d6   13 months ago   50.8MB
+registry.aliyuncs.com/google_containers/pause                     3.4.1      0f8457a4c2ec   21 months ago   683kB
+registry.aliyuncs.com/google_containers/coredns                   v1.8.0     296a6d5035e2   24 months ago   42.5MB
+registry.aliyuncs.com/google_containers/etcd                      3.4.13-0   0369cf4303ff   2 years ago     253MB
+[root@k8s-master ~]# netstat -lntup  #查看系统是否占用10251。10252 端口
+[root@k8s-master ~]# cd /etc/kubernetes/manifests/
+[root@k8s-master manifests]# ls
+etcd.yaml  kube-apiserver.yaml  kube-controller-manager.yaml  kube-scheduler.yaml
+[root@k8s-master manifests]# vim kube-controller-manager.yaml   # 去掉--port=0这行
+[root@k8s-master manifests]# vim kube-scheduler.yaml            # 去掉--port=0这行
+[root@k8s-master manifests]# systemctl restart kubelet          # 重启服务
+[root@k8s-master manifests]# kubectl get cs
+Warning: v1 ComponentStatus is deprecated in v1.19+
+NAME                 STATUS    MESSAGE             ERROR
+controller-manager   Healthy   ok
+etcd-0               Healthy   {"health":"true"}
+scheduler            Healthy   ok
+参考：https://blog.csdn.net/xiaobao7865/article/details/107513957
+```
 
 
 
@@ -250,11 +314,11 @@ Pod -> Pod的标签
 - 可以允许同一个node节点中调度两个myblog的副本，前提是尽量把pod分散部署在集群中
 
 ```yaml
-...
+... # AntiAffinity反亲和性 ，node节点有 标签 app=myblog  不要调度过去
     spec:
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
+          requiredDuringSchedulingIgnoredDuringExecution: #硬策略
           - labelSelector:
               matchExpressions:
               - key: app
@@ -265,12 +329,12 @@ Pod -> Pod的标签
       containers:
 ...
 # 如果某个节点中，存在了app=myblog的label的pod，那么 调度器一定不要给我调度过去
-
+#　AntiAffinity　反亲和性，标签app=myblog 不要优先调度
 ...
     spec:
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
+          preferredDuringSchedulingIgnoredDuringExecution:　　＃软策略
           - weight: 100
             podAffinityTerm:
               labelSelector:
@@ -369,8 +433,8 @@ spec:
 ###### [Cordon](http://49.7.203.222:3000/#/kubernetes-advanced/scheduler?id=cordon)
 
 ```bash
-$ kubectl cordon k8s-slave2
-$ kubectl drain k8s-slave2
+$ kubectl cordon k8s-slave2  # 设置slave2 不可调度   # 单词cordon 警戒线
+$ kubectl drain k8s-slave2   # 恢复调度
 ```
 
 
@@ -411,7 +475,7 @@ $ kubectl drain k8s-slave2
 
     - 以NamespaceLifecycle为例， 该插件确保处于Termination状态的Namespace不再接收新的对象创建请求，并拒绝请求不存在的Namespace。该插件还可以防止删除系统保留的Namespace:default，kube-system，kube-public
 
-    - LimitRanger，若集群的命名空间设置了LimitRange对象，若Pod声明时未设置资源值，则按照LimitRange的定义来未Pod添加默认值
+    - LimitRanger，若集群的命名空间设置了LimitRange对象，若Pod声明时未设置资源值，则按照LimitRange的定义来为Pod添加默认值
 
       ```yaml
       apiVersion: v1
