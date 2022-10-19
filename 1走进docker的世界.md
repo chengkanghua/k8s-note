@@ -859,7 +859,7 @@ $ docker exec -ti mysql bash
 ###### [启动Django应用](http://49.7.203.222:3000/#/docker/containerization?id=启动django应用)
 
 ```bash
-## 启动容器
+## 启动容器 修改数据ip
 $ docker run -d -p 8002:8002 --name myblog -e MYSQL_HOST=10.211.55.6 -e MYSQL_USER=root -e MYSQL_PASSWD=123456  myblog:v1 
 
 ## migrate
@@ -880,9 +880,9 @@ $ docker exec -ti myblog python3 manage.py createsuperuser
 
 ```bash
 # 将正在运行的容器保持成镜像
-[root@k8s-slave2 ~]# docker commit myblog  192.168.31.113:5000/myblog:v1.1
+[root@k8s-slave2 ~]# docker commit myblog  192.168.31.113:5000/myblog:v2
 sha256:ad705fa61e112e36bc67bd4ff566b93d5950ac65733a7de07c39fbbde634ceca
-[root@k8s-slave2 ~]# docker push 192.168.31.113:5000/myblog:v1.1
+[root@k8s-slave2 ~]# docker push 192.168.31.113:5000/myblog:v2
 # 镜像重新打tag
 docker tag myblog:v1 192.168.31.113:5000/myblog:v1   
 docker push 192.168.31.113:5000/myblog:v1

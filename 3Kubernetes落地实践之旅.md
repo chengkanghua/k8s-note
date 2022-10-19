@@ -273,8 +273,8 @@ metadata:
     component: myblog
 spec:
   containers:
-  - name: nginx
-    image: nginx:latest
+  - name: myblog
+    image: 10.211.55.27:5000/myblog:v2
     env:
     - name: MYSQL_HOST
       value: "127.0.0.1"
@@ -922,7 +922,7 @@ spec:
     imagePullPolicy: IfNotPresent
     env:
     - name: MYSQL_HOST   #  指定root用户的用户名
-      value: "172.21.51.55"
+      value: "172.21.51.55"  # 修改成数据库地址
     - name: MYSQL_PASSWD
       value: "123456"
     ports:
@@ -1031,7 +1031,7 @@ k8s提供两类资源，configMap和Secret，可以用来实现业务配置的�
     namespace: luffy
   type: Opaque
   data:
-    MYSQL_USER: cm9vdA==        #注意加-n参数， echo -n root|base64
+    MYSQL_USER: cm9vdA==       #注意加-n参数， echo -n root|base64
     MYSQL_PASSWD: MTIzNDU2
     
   ```
@@ -1204,6 +1204,7 @@ spec:
 在部署不同的环境时，pod的yaml无须再变化，只需要在每套环境中维护一套ConfigMap和Secret即可。但是注意configmap和secret不能跨namespace使用，且更新后，pod内的env不会自动更新，重建后方可更新。
 
 ```bash
+kubectl -n luffy delete pod myblog mysql
 kubectl create -f mysql-with-config.yaml
 kubectl create -f myblog-with-config.yaml
 ```
@@ -1407,7 +1408,7 @@ $ cat /tmp/loap/timing
 myblog/deployment/deploy-mysql.yaml
 [root@k8s-slave1 ~]# mkdir -p myblog/deployment/
 [root@k8s-slave1 ~]# cd myblog/deployment/
-[root@k8s-slave1 deployment]# vim deploy-mysql.yaml
+[root@k8s-slave1 deployment]# vim mysql.dpl.yaml
 --------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
@@ -1469,7 +1470,7 @@ spec:
           mountPath: /var/lib/mysql
 ```
 
-deploy-myblog.yaml:
+myblog.dpl.yaml:
 
 ```yaml
 apiVersion: apps/v1
@@ -1489,7 +1490,7 @@ spec:
     spec:
       containers:
       - name: myblog
-        image: 172.21.51.143:5000/myblog:v1
+        image: 172.21.51.143:5000/myblog:v1  #修改实际的仓库地址
         imagePullPolicy: IfNotPresent
         env:
         - name: MYSQL_HOST
@@ -1542,8 +1543,9 @@ spec:
 ###### [创建Deployment](http://49.7.203.222:3000/#/kubernetes-base/practice-deployment?id=创建deployment)
 
 ```bash
-$ kubectl create -f deploy-myblog.yaml  
-$ kubectl create -f deploy-mysql.yaml
+kubectl -n luffy delete pod mysql myblog
+kubectl create -f deploy-myblog.yaml  
+kubectl create -f deploy-mysql.yaml
 ```
 
 ###### [查看Deployment](http://49.7.203.222:3000/#/kubernetes-base/practice-deployment?id=查看deployment)
@@ -1611,14 +1613,14 @@ $ kubectl -n luffy delete pod myblog-7c96c9f76b-qbbg7
 # kubectl -n luffy delete pod  myblog-7c96c9f76b-qbbg7 --force --grace-period=0
 
 # 观察pod
-$ kubectl -n luffy  get pods -o wide
+$ kubectl -n luffy  get pods -o wide -w
 
 ## 设置两个副本, 或者通过kubectl -n luffy edit deploy myblog的方式，最好通过修改文件，然后apply的方式，这样yaml文件可以保持同步
 $ kubectl -n luffy scale deploy myblog --replicas=2
 deployment.extensions/myblog scaled
 
 # 观察pod
-$ kubectl -n luffy get pods -o wide
+$ kubectl -n luffy get pods -o wide -w
 NAME                      READY   STATUS    RESTARTS   AGE
 myblog-7c96c9f76b-qbbg7   1/1     Running   0          11m
 myblog-7c96c9f76b-s6brm   1/1     Running   0          55s
@@ -2014,6 +2016,14 @@ $ kubectl delete -f deploy-mysql.yaml
 $ kubectl create -f deploy-mysql.yaml
 $ kubectl -n luffy get deploy
 ## myblog不用动，会自动因健康检测不过而重启
+
+[root@k8s-master deployment]# kubectl -n luffy get deploy
+[root@k8s-master deployment]# kubectl -n luffy get po -owide
+[root@k8s-master deployment]# kubectl -n luffy get svc
+NAME     TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+myblog   ClusterIP   10.96.51.241    <none>        80/TCP     27m
+mysql    ClusterIP   10.111.61.164   <none>        3306/TCP   15m
+[root@k8s-master deployment]# curl 10.96.51.241/blog/index/
 ```
 
 服务发现实现：

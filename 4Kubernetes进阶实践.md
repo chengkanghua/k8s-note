@@ -1,4 +1,4 @@
-# 操作etcd
+#  操作etcd
 
 #### [ETCD常用操作](http://49.7.203.222:3000/#/kubernetes-advanced/etcd?id=etcd常用操作)
 
@@ -503,7 +503,117 @@ $ kubectl drain k8s-slave2   # 恢复调度
       ```
 
     ```bash
-    $ kubectl apply -f .
+    $ kubectl create ns demo
+    $ kubectl apply -f 1m.yaml
+    [root@k8s-master ~]# kubectl -n demo get pod -owide
+    NAME               READY   STATUS    RESTARTS   AGE   IP            NODE         NOMINATED NODE   READINESS GATES
+    default-mem-demo   1/1     Running   0          51s   10.244.1.18   k8s-slave1   <none>           <none>
+    [root@k8s-master ~]# kubectl -n demo get po default-mem-demo -oyaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/last-applied-configuration: |
+          {"apiVersion":"v1","kind":"Pod","metadata":{"annotations":{},"name":"default-mem-demo","namespace":"demo"},"spec":{"containers":[{"image":"nginx:alpine","name":"default-mem-demo"}]}}
+        kubernetes.io/limit-ranger: 'LimitRanger plugin set: memory request for container
+          default-mem-demo; memory limit for container default-mem-demo'
+      creationTimestamp: "2022-10-18T06:44:44Z"
+      name: default-mem-demo
+      namespace: demo
+      resourceVersion: "169530"
+      uid: cf164b39-94c0-4855-aead-ad6e5d1d4c1e
+    spec:
+      containers:
+      - image: nginx:alpine
+        imagePullPolicy: IfNotPresent
+        name: default-mem-demo
+        resources:
+          limits:   # 默认设置上了
+            memory: 512Mi
+          requests:
+            memory: 256Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          name: kube-api-access-m88bn
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      enableServiceLinks: true
+      nodeName: k8s-slave1
+      preemptionPolicy: PreemptLowerPriority
+      priority: 0
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: default
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - effect: NoExecute
+        key: node.kubernetes.io/not-ready
+        operator: Exists
+        tolerationSeconds: 300
+      - effect: NoExecute
+        key: node.kubernetes.io/unreachable
+        operator: Exists
+        tolerationSeconds: 300
+      volumes:
+      - name: kube-api-access-m88bn
+        projected:
+          defaultMode: 420
+          sources:
+          - serviceAccountToken:
+              expirationSeconds: 3607
+              path: token
+          - configMap:
+              items:
+              - key: ca.crt
+                path: ca.crt
+              name: kube-root-ca.crt
+          - downwardAPI:
+              items:
+              - fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+                path: namespace
+    status:
+      conditions:
+      - lastProbeTime: null
+        lastTransitionTime: "2022-10-18T06:44:44Z"
+        status: "True"
+        type: Initialized
+      - lastProbeTime: null
+        lastTransitionTime: "2022-10-18T06:45:10Z"
+        status: "True"
+        type: Ready
+      - lastProbeTime: null
+        lastTransitionTime: "2022-10-18T06:45:10Z"
+        status: "True"
+        type: ContainersReady
+      - lastProbeTime: null
+        lastTransitionTime: "2022-10-18T06:44:44Z"
+        status: "True"
+        type: PodScheduled
+      containerStatuses:
+      - containerID: docker://a312e76b0b54b2adcab6c4c9d2cf573f72c260d41806cc6fd69b2bad5f63a5d1
+        image: nginx:alpine
+        imageID: docker-pullable://nginx@sha256:eb05700fe7baa6890b74278e39b66b2ed1326831f9ec3ed4bdc6361a4ac2f333
+        lastState: {}
+        name: default-mem-demo
+        ready: true
+        restartCount: 0
+        started: true
+        state:
+          running:
+            startedAt: "2022-10-18T06:45:09Z"
+      hostIP: 10.211.55.26
+      phase: Running
+      podIP: 10.244.1.18
+      podIPs:
+      - ip: 10.244.1.18
+      qosClass: Burstable
+      startTime: "2022-10-18T06:44:44Z"
     ```
 
   - NodeRestriction， 此插件限制kubelet修改Node和Pod对象，这样的kubelets只允许修改绑定到Node的Pod API对象，以后版本可能会增加额外的限制 。开启Node授权策略后，默认会打开该项
@@ -538,6 +648,75 @@ $ kubectl get nodes -v=7
 I0329 20:20:08.633065    3979 loader.go:359] Config loaded from file /root/.kube/config
 I0329 20:20:08.633797    3979 round_trippers.go:416] GET https://172.21.51.143:6443/api/v1/nodes?limit=500
 ```
+
+```bash
+[root@k8s-master ~]# cat /root/.kube/config
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJeU1UQXhNREF6TURjek0xb1hEVE15TVRBd056QXpNRGN6TTFvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTFI5CldQazUvRFYyZTJZWEx0NUcySW03ajNoSGRrSndiTUVqRFFLd1FyMXZNVUc0WWw4dmQxMk9odjIvYkRHUlh6T0sKRTR6ZEhRVEZKV1dLRTNhSHJYcGpUSnBuOWNBc2YxN2VFcy9RWHczVk03bmllZzIxY204bjc4akRUaTdaQUI0ZApmTWRYNmJscWx3U05LOGc0RUV5L1BFZjhjdzhOY25oTjZGSkJzc3p6MTMzVkFFM0w5QWVuUlppUklFNDNnaEhaCkJQRFY4aEpkQ3cyMDlTaHBranNvRXM1YWJyL3JQV1F6OVgvdzRlNGgyU1FXb2xXUERQckdIeStqeDloa2RkMDQKa1EvYnZaOEdFZDl3aWhaYXNvelA0VmNOYk5UR0ZQbmpNUjM0dkE0U3BTQ2U1VFZWZkQ0ZitFRW9IM3NET25vbgpldGM3NldsSUpkMkY3Q2Q3ZWpFQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZJSGlTWFZDNXRXRmJZWUwxdm1ya3VjMlJseVNNQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCL2NZMVFtd3ZZN09EeDQ1WVcveExTRWlmcTRvc08xTFF6bXdJcFBodW5FWEFoa3NWcAp3bkdCL3JTdjhjNzVwOVhmUG1pWTNNaXJpNENIU1lRSnBXWGY0YUZ1ZDJ0MnNvVmdkTkNGeE50QlNzU1NBY1JmCk5LdkJLZzZtS1YxUUEvaG5HbklMU1Rhd2YxdGdrVERMNmEwQTkzSk1NMENZNWRwK084RnhDOEN3RFlWelRCQXoKa3RIS3p1RU9QbCszWGhSSFJldGJjUHM1L2pPbVBicmZHK1JReWhtSmJhZE5BRGV2QVBFZnNhajFQVTNWTU1DVQpVWFlDc2JMU1ZaSEhRT2Yyd202L0JBWS93Zkdaclo1OXpVUndUZnFJSTd4Q2R3Qnc4ZG5CL24rcDhtQUs3SnFUCkZwYWZPdUgralRxQnlJR0VSWUFPRzhwVS9NQkpHckphRjM2ZQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    server: https://10.211.55.25:6443
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: kubernetes-admin
+  name: kubernetes-admin@kubernetes
+current-context: kubernetes-admin@kubernetes
+kind: Config
+preferences: {}
+users:
+- name: kubernetes-admin
+  user:
+    client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM4ekNDQWR1Z0F3SUJBZ0lKQUp5dWdZbEdzTXMwTUEwR0NTcUdTSWIzRFFFQkN3VUFNQlV4RXpBUkJnTlYKQkFNVENtdDFZbVZ5Ym1WMFpYTXdIaGNOTWpJeE1ERXdNRFV4TlRJMVdoY05Nekl4TURBM01EVXhOVEkxV2pBMApNUmN3RlFZRFZRUUtEQTV6ZVhOMFpXMDZiV0Z6ZEdWeWN6RVpNQmNHQTFVRUF3d1FhM1ZpWlhKdVpYUmxjeTFoClpHMXBiakNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFNaVJyaWhJMUk0L0xkWWQKVkRBQkFqUkpEa3lPR3dRT2NVblRsNUVJS29nZ09rZGZ2azRrTkJlUWlLNmd4cUlUY3M0SEQ3ZmhqSW9tUkU1Ugpyd00wa2lQVmhJb2VvVVl2dXE0eEJxY2ZGenRtU0E4Ni9aSEk5Q2FaOW93RnNNZmpXRDZ0QlRlUUwwdDVWWG13ClBmemxkbFI1VmVBV3lzZVV4blNtOU1oYkJJY2pjc0lwbnpuQzM5WmNjY2IwZko5a0V1V21JUTVZMng1TEFRdXAKUEY4ODNUYWpXOGw5OTFZV0ZVY1FnRG9iVjhySGRGdTZaMHcwM1BpdFRQRXliTitlQ3o1dEI4cnhlbFhhQXR5SQpoQ2hwU2FsakIvRkVJMGl1OUNRN3UzMmVJZExtcUE3cklScmYxMjdqcXRVelhpUjZHVzNjc1ZubjE3L3R4YytDClFsSjlnajhDQXdFQUFhTW5NQ1V3RGdZRFZSMFBBUUgvQkFRREFnV2dNQk1HQTFVZEpRUU1NQW9HQ0NzR0FRVUYKQndNQ01BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQk8zSVRsbFhCOUNNVk1ITzJlOXJ0eWMrM1R5VHdMK0ltawp4SCtyT3pZYWF6Tm1ZN0FyZmpHME1hdlBidW9aOW50dmExWDBSaXIzT3FtL1RwYzV1OHpKVW1raytiZmluS2dmCndaRFNQVEdHR0taQUp5UXBwbGREenJpVm9GQi9GYlgya0ozblBlZWwrb0F6aVpGYitYendpcFJ5TnVGR0g3REcKK2JXTi9yZ1BxalRNcXRzaG9rMFdMM1JHRW8xSmVWYmY1akMycHM5cXFJZWs5SVJJenI1TEMvQ1VSaDNKTW9WZQpFVmtOY283d25qR2pCbzh2b1o0b0hSOW9IeHN1T3BmSjN0SVRjNE0zK3kzRUM3cG5IRnA0R2EvVXlhVFdRMWNYCnRqNVNiVWtSdUJLdzZuTm9CVlo2dUlUQStTcjJlYkZkZEExYjBmY2JVcXduanNHL1N0NXkKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+    client-key-data: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBeUpHdUtFalVqajh0MWgxVU1BRUNORWtPVEk0YkJBNXhTZE9Ya1FncWlDQTZSMSsrClRpUTBGNUNJcnFER29oTnl6Z2NQdCtHTWlpWkVUbEd2QXpTU0k5V0VpaDZoUmkrNnJqRUdweDhYTzJaSUR6cjkKa2NqMEpwbjJqQVd3eCtOWVBxMEZONUF2UzNsVmViQTkvT1YyVkhsVjRCYkt4NVRHZEtiMHlGc0VoeU55d2ltZgpPY0xmMWx4eHh2UjhuMlFTNWFZaERsamJIa3NCQzZrOFh6emROcU5ieVgzM1ZoWVZSeENBT2h0WHlzZDBXN3BuClREVGMrSzFNOFRKczM1NExQbTBIeXZGNlZkb0MzSWlFS0dsSnFXTUg4VVFqU0s3MEpEdTdmWjRoMHVhb0R1c2gKR3QvWGJ1T3ExVE5lSkhvWmJkeXhXZWZYdiszRno0SkNVbjJDUHdJREFRQUJBb0lCQUZwL3VVaCtERUtlNlV5NgpjUmt6NjAyeVJSeHY1bXEvSllqOVMxOXFndDVuUkVTZVE5MDRZclRiUjRFY0ZHUmZTQ2NFY3FneXdsbzNpQXlhCnVOQkdjVVp2K2x6a0V6cjdJRTJtMjJ5ZkQ3bUNuak1aRi84bTRGdG1qeU9CRWRJdmw4cTRBU21nQ21jUXVXdXUKQlZwT0kwVmNkazRsbXB2UlduYWFPc3NJbnBObXMzZW1yN2U0RnhEODFXVXVBK21JbW1TUXIwUnY4azQ1WkRnVgp0MWZkcC9YVEV1Z3VSUTQ0THBudi9nOU00YUNwcFU2dk5ScU5WNnh0d0wwcmVPRS95djVTcFpIK3E3RTducGJZCkdSYWNtTkVnZzNvSTJBSlBlOStWS00vV01zRk1aZUJoNXNnSnZzNS8xa0dwcURrc3pad3VjZzl2cDR4RGRaWjAKVDVudWFwRUNnWUVBNys3cmtzOFNFbXpEaVZyTmNXZnJpZFErZzNqZS9INmtjc0lSeXNOSmVGdjhrZDZ1N0hyVgpMRzk5dVc5WGtybnQ5SHJuMS9mMjB5Z3lvVTJteFlOQXBKWmhnTWZyWTFjK1RuZTBxbmx1SlVERjBURkordkl4CmRPOStEdkpwelFycExxbzBzc1AwT3BMbmJqTFZxOVBSWkdqZHN6UCt1SzRiUzNPQm9JNDhaUWtDZ1lFQTFmLzAKZ3ZzMjVRQ2puUXR5NVpSU29HRlRvdWd2Tm5kUG5maFdHSmR1aHB6ZGcwWFllZ1M0R2pyZnlCOXFKdHhYZkt3VwpZK3lmREZYb2FDUE94OXl4UEF1RytHZndHRUprRHVRNFRMSXRvSHdxN3p5OXIrZzh4a3c4Yjl0NUpuWVZiVTBoCjdOakJaS3dqOHdCREVYVlpBdXpYbWNsNDVpejRpMjZYRjZQWGh3Y0NnWUF4dTBQNDJoTFUzdFpvMGZsaldEYnEKQ3FRcWZCTThJc1BUUllhS2tJL1o4cmNYUlNEY3cxa01MTS9TYjlHbkNBTGFlZDgwVktGRWcwQjdUcTBTbzNIeQpxM2pxU0lYeHdWT1kwQmNTZnJqbDM5Y2cxU2FRYlVMekNmRUhDQmdGK0F6OUx5cGRJMkNzQTJjVTRGU0ptUTM5CjBmNmg5bFVGMHBDMXd1dExiQy80Z1FLQmdCbkFHTjRCK0pNSnhxWkpFR1JMdXIyTnVKQ3J1N0trSExKM2hYU2sKRkNxaWlZMFlSSG82UXlUMDNLU3FFdzNtQ2FqNDFDRG1BaVZyMlBGZkRhekRBNWlrRW5PbG5pQnRMTGtXQVNoSgpjSEFWUU4xVXc4WjgvWU1tL1ViQWRBMkt1LzFSQUxvTlF3Z29KcE5BL3RFRSs5YjhSTjArZnd2RGNZemxtOHkrCmJGclZBb0dCQUp3TmdINkgrWEZFcGx6bFpILzZvbEJoa3ljcnBiOTZGTmN3eXA5cGNSUXhsaC9tZGNFd2lBSDYKbXhDUG1IY2JlcEZlejNlVGpaUnJOeFdRMFp6UGQyVk5VbFZXUE1uV3Vadk0wWFJhRng5YmdqY2hLUERhU0N4SwpXaTYxcHFKcUZVSlRzQjM5WWdjZk1TTjI3WVBzbHVEWlI1MkVrTDFlT3Nkb2pBTm54R0VqCi0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==
+[root@k8s-master ~]# echo LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM4ekNDQWR1Z0F3SUJBZ0lKQUp5dWdZbEdzTXMwTUEwR0NTcUdTSWIzRFFFQkN3VUFNQlV4RXpBUkJnTlYKQkFNVENtdDFZbVZ5Ym1WMFpYTXdIaGNOTWpJeE1ERXdNRFV4TlRJMVdoY05Nekl4TURBM01EVXhOVEkxV2pBMApNUmN3RlFZRFZRUUtEQTV6ZVhOMFpXMDZiV0Z6ZEdWeWN6RVpNQmNHQTFVRUF3d1FhM1ZpWlhKdVpYUmxjeTFoClpHMXBiakNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFNaVJyaWhJMUk0L0xkWWQKVkRBQkFqUkpEa3lPR3dRT2NVblRsNUVJS29nZ09rZGZ2azRrTkJlUWlLNmd4cUlUY3M0SEQ3ZmhqSW9tUkU1Ugpyd00wa2lQVmhJb2VvVVl2dXE0eEJxY2ZGenRtU0E4Ni9aSEk5Q2FaOW93RnNNZmpXRDZ0QlRlUUwwdDVWWG13ClBmemxkbFI1VmVBV3lzZVV4blNtOU1oYkJJY2pjc0lwbnpuQzM5WmNjY2IwZko5a0V1V21JUTVZMng1TEFRdXAKUEY4ODNUYWpXOGw5OTFZV0ZVY1FnRG9iVjhySGRGdTZaMHcwM1BpdFRQRXliTitlQ3o1dEI4cnhlbFhhQXR5SQpoQ2hwU2FsakIvRkVJMGl1OUNRN3UzMmVJZExtcUE3cklScmYxMjdqcXRVelhpUjZHVzNjc1ZubjE3L3R4YytDClFsSjlnajhDQXdFQUFhTW5NQ1V3RGdZRFZSMFBBUUgvQkFRREFnV2dNQk1HQTFVZEpRUU1NQW9HQ0NzR0FRVUYKQndNQ01BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQk8zSVRsbFhCOUNNVk1ITzJlOXJ0eWMrM1R5VHdMK0ltawp4SCtyT3pZYWF6Tm1ZN0FyZmpHME1hdlBidW9aOW50dmExWDBSaXIzT3FtL1RwYzV1OHpKVW1raytiZmluS2dmCndaRFNQVEdHR0taQUp5UXBwbGREenJpVm9GQi9GYlgya0ozblBlZWwrb0F6aVpGYitYendpcFJ5TnVGR0g3REcKK2JXTi9yZ1BxalRNcXRzaG9rMFdMM1JHRW8xSmVWYmY1akMycHM5cXFJZWs5SVJJenI1TEMvQ1VSaDNKTW9WZQpFVmtOY283d25qR2pCbzh2b1o0b0hSOW9IeHN1T3BmSjN0SVRjNE0zK3kzRUM3cG5IRnA0R2EvVXlhVFdRMWNYCnRqNVNiVWtSdUJLdzZuTm9CVlo2dUlUQStTcjJlYkZkZEExYjBmY2JVcXduanNHL1N0NXkKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=|base64 -d
+-----BEGIN CERTIFICATE-----
+MIIC8zCCAdugAwIBAgIJAJyugYlGsMs0MA0GCSqGSIb3DQEBCwUAMBUxEzARBgNV
+BAMTCmt1YmVybmV0ZXMwHhcNMjIxMDEwMDUxNTI1WhcNMzIxMDA3MDUxNTI1WjA0
+MRcwFQYDVQQKDA5zeXN0ZW06bWFzdGVyczEZMBcGA1UEAwwQa3ViZXJuZXRlcy1h
+ZG1pbjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMiRrihI1I4/LdYd
+VDABAjRJDkyOGwQOcUnTl5EIKoggOkdfvk4kNBeQiK6gxqITcs4HD7fhjIomRE5R
+rwM0kiPVhIoeoUYvuq4xBqcfFztmSA86/ZHI9CaZ9owFsMfjWD6tBTeQL0t5VXmw
+PfzldlR5VeAWyseUxnSm9MhbBIcjcsIpnznC39Zcccb0fJ9kEuWmIQ5Y2x5LAQup
+PF883TajW8l991YWFUcQgDobV8rHdFu6Z0w03PitTPEybN+eCz5tB8rxelXaAtyI
+hChpSaljB/FEI0iu9CQ7u32eIdLmqA7rIRrf127jqtUzXiR6GW3csVnn17/txc+C
+QlJ9gj8CAwEAAaMnMCUwDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoGCCsGAQUF
+BwMCMA0GCSqGSIb3DQEBCwUAA4IBAQBO3ITllXB9CMVMHO2e9rtyc+3TyTwL+Imk
+xH+rOzYaazNmY7ArfjG0MavPbuoZ9ntva1X0Rir3Oqm/Tpc5u8zJUmkk+bfinKgf
+wZDSPTGGGKZAJyQppldDzriVoFB/FbX2kJ3nPeel+oAziZFb+XzwipRyNuFGH7DG
++bWN/rgPqjTMqtshok0WL3RGEo1JeVbf5jC2ps9qqIek9IRIzr5LC/CURh3JMoVe
+EVkNco7wnjGjBo8voZ4oHR9oHxsuOpfJ3tITc4M3+y3EC7pnHFp4Ga/UyaTWQ1cX
+tj5SbUkRuBKw6nNoBVZ6uITA+Sr2ebFddA1b0fcbUqwnjsG/St5y
+-----END CERTIFICATE-----
+[root@k8s-master ~]# echo LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM4ekNDQWR1Z0F3SUJBZ0lKQUp5dWdZbEdzTXMwTUEwR0NTcUdTSWIzRFFFQkN3VUFNQlV4RXpBUkJnTlYKQkFNVENtdDFZbVZ5Ym1WMFpYTXdIaGNOTWpJeE1ERXdNRFV4TlRJMVdoY05Nekl4TURBM01EVXhOVEkxV2pBMApNUmN3RlFZRFZRUUtEQTV6ZVhOMFpXMDZiV0Z6ZEdWeWN6RVpNQmNHQTFVRUF3d1FhM1ZpWlhKdVpYUmxjeTFoClpHMXBiakNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFNaVJyaWhJMUk0L0xkWWQKVkRBQkFqUkpEa3lPR3dRT2NVblRsNUVJS29nZ09rZGZ2azRrTkJlUWlLNmd4cUlUY3M0SEQ3ZmhqSW9tUkU1Ugpyd00wa2lQVmhJb2VvVVl2dXE0eEJxY2ZGenRtU0E4Ni9aSEk5Q2FaOW93RnNNZmpXRDZ0QlRlUUwwdDVWWG13ClBmemxkbFI1VmVBV3lzZVV4blNtOU1oYkJJY2pjc0lwbnpuQzM5WmNjY2IwZko5a0V1V21JUTVZMng1TEFRdXAKUEY4ODNUYWpXOGw5OTFZV0ZVY1FnRG9iVjhySGRGdTZaMHcwM1BpdFRQRXliTitlQ3o1dEI4cnhlbFhhQXR5SQpoQ2hwU2FsakIvRkVJMGl1OUNRN3UzMmVJZExtcUE3cklScmYxMjdqcXRVelhpUjZHVzNjc1ZubjE3L3R4YytDClFsSjlnajhDQXdFQUFhTW5NQ1V3RGdZRFZSMFBBUUgvQkFRREFnV2dNQk1HQTFVZEpRUU1NQW9HQ0NzR0FRVUYKQndNQ01BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQk8zSVRsbFhCOUNNVk1ITzJlOXJ0eWMrM1R5VHdMK0ltawp4SCtyT3pZYWF6Tm1ZN0FyZmpHME1hdlBidW9aOW50dmExWDBSaXIzT3FtL1RwYzV1OHpKVW1raytiZmluS2dmCndaRFNQVEdHR0taQUp5UXBwbGREenJpVm9GQi9GYlgya0ozblBlZWwrb0F6aVpGYitYendpcFJ5TnVGR0g3REcKK2JXTi9yZ1BxalRNcXRzaG9rMFdMM1JHRW8xSmVWYmY1akMycHM5cXFJZWs5SVJJenI1TEMvQ1VSaDNKTW9WZQpFVmtOY283d25qR2pCbzh2b1o0b0hSOW9IeHN1T3BmSjN0SVRjNE0zK3kzRUM3cG5IRnA0R2EvVXlhVFdRMWNYCnRqNVNiVWtSdUJLdzZuTm9CVlo2dUlUQStTcjJlYkZkZEExYjBmY2JVcXduanNHL1N0NXkKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=|base64 -d > auth/kubectl.crt
+[root@k8s-master ~]# mkdir auth
+[root@k8s-master ~]# mv kubectl.crt auth/
+[root@k8s-master ~]# ll /etc/kubernetes/pki/ca.crt
+-rw-r--r--. 1 root root 1066 10月 10 11:07 /etc/kubernetes/pki/ca.crt
+# 验证证书是否是合法， 
+[root@k8s-master ~]# openssl verify -CAfile /etc/kubernetes/pki/ca.crt auth/kubectl.crt
+auth/kubectl.crt: OK
+# 证书解析
+[root@k8s-master ~]# openssl x509 -in auth/kubectl.crt -text
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            9c:ae:81:89:46:b0:cb:34
+    Signature Algorithm: sha256WithRSAEncryption
+        Issuer: CN=kubernetes
+        Validity
+            Not Before: Oct 10 05:15:25 2022 GMT
+            Not After : Oct  7 05:15:25 2032 GMT
+        Subject: O=system:masters, CN=kubernetes-admin  # o: Group CN:user
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                Public-Key: (2048 bit)
+                ....
+```
+
+
 
 `kubeadm init`启动完master节点后，会默认输出类似下面的提示内容：
 
@@ -754,7 +933,7 @@ RBAC模式引入了4个资源类型：
     name: read-secrets-global
   subjects:
   - kind: Group
-    name: manager # Name is case sensitive
+    name: manager # Name is case sensitive  |名称区分大小写
     apiGroup: rbac.authorization.k8s.io
   roleRef:
     kind: ClusterRole
@@ -980,6 +1159,8 @@ token:      eyJhbGciOiJSUzI1NiIsImtpZCI6InBtQUZfRl8ycC03TTBYaUUwTnJVZGpvQWU0cXZ5
 ...
 $ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6InBtQUZfRl8ycC03TTBYaUUwTnJVZGpvQWU0cXZ5M2FFbjR2ZjkzZVcxOE0ifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJsdWZmeSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJsdWZmeS1hZG1pbi10b2tlbi1wcnIyNSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJsdWZmeS1hZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6ImFhZDA0MTU3LTliNzMtNDJhZC1hMGU4LWVmOTZlZDU3Yzg1ZiIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpsdWZmeTpsdWZmeS1hZG1pbiJ9.YWckylE5wlKITKrVltXY4VPKvZP9ar5quIT5zq9N-0_FnDkLIBX7xOyFvZA5Wef0wSFSZe3e9FwrO1UbPsmK7cZn74bhH8cNdoH_YVbIVT3-6tIOlCA_Bc8YypGE1gl-ZvLOIPV7WnRQsWpWtZtqfKBSkwLAHgWoxcx_d1bOcyTOdPmsW224xcBxjYwi6iRUtjTJST0LzOcAOCPDZq6-lqYUwnxLO_afxwg71BGX4etE48Iny8TxSEIs1VJRahoabC7hVOs17ujEm5loTDSpfuhae51qSDg8xeYwRHdM42aLUmc-wOvBWauHa5EHbH9rWPAnpaGIwF8QvnLszqp4QQ" https://172.21.51.143:6443/api/v1/namespaces/luffy/pods?limit=500
 
+$ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6Ik9VMi1HX3FFMlBUT193OUo3ZWI4eDh3aE9pc0dTYXMyQWRMNnRHNHJtMWsifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlcm5ldGVzLWRhc2hib2FyZCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi03Y2xyeiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjhjNjRkMjFmLWJkYzYtNDYxMC05YmIxLWRkYjIyMDE3ZmVkMCIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlcm5ldGVzLWRhc2hib2FyZDphZG1pbiJ9.a7UIMu1PfZ3e4j51R2qIiWZm0yZgdn5TNoUOwNLtMKdGX0LsUQP7NhUJQY_uX4ymtjqQj3aBXY7t3fWamGSBxqkf7nD5s34ibBES-ve6IXUNgQYQg3o1kJWwen20VzjCcQbNcq8Ba6W7Zz37kx6IQQNCAq41Tzq030APZ2JsGnzL8HIkHxQ5SAu8HzKsUTg1Zu7r6aDh97CwRych3Wcr09BzF6R0gB3Gb2KvqAbWItusysdt1YYw_Vmu7YbUdmi437Zcsw6JBLDLrdnSEs4AYyXdSG5_63OevHKaWpDjx4uTCawt7fhP-MpzktOctUK-RpCAAp9dbr4VINwbOj51Tg" https://10.211.55.25:6443/api/v1/namespaces/luffy/pods?limit=500
+
 # https://172.21.51.143:6443/api/v1/nodes
 ```
 
@@ -995,7 +1176,7 @@ $ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6InBtQUZfRl8ycC0
 
 ###### [创建用户认证授权的kubeconfig文件](http://49.7.203.222:3000/#/kubernetes-advanced/auth?id=创建用户认证授权的kubeconfig文件)
 
-签发证书对：
+签发证书对： 生成一个只对luffy命名空间有操作权限的密钥
 
 ```bash
 # 生成私钥
@@ -1012,18 +1193,20 @@ extendedKeyUsage = clientAuth
 
 # 生成luffy.crt证书
 $ openssl x509 -req -in luffy.csr -CA /etc/kubernetes/pki/ca.crt -CAkey /etc/kubernetes/pki/ca.key -CAcreateserial -sha256 -out luffy.crt -extensions v3_ca -extfile extfile.conf -days 3650
+
+[root@k8s-master cert]# openssl x509 -in luffy.crt -text
 ```
 
 配置kubeconfig文件：
 
 ```bash
-# 创建kubeconfig文件，指定集群名称和地址
+# 创建kubeconfig文件，指定集群名称和ip地址
 $ kubectl config set-cluster luffy-cluster --certificate-authority=/etc/kubernetes/pki/ca.crt --embed-certs=true --server=https://172.21.51.143:6443 --kubeconfig=luffy.kubeconfig
 
 # 为kubeconfig文件添加认证信息
 $ kubectl config set-credentials luffy-admin --client-certificate=luffy.crt --client-key=luffy.key --embed-certs=true --kubeconfig=luffy.kubeconfig
 
-# 为kubeconfig添加上下文配置
+# 为kubeconfig添加上下文配置 注意：--user 和上面创建的user一样
 $ kubectl config set-context luffy-context --cluster=luffy-cluster --user=luffy-admin --kubeconfig=luffy.kubeconfig
 
 # 设置默认的上下文
@@ -1071,6 +1254,37 @@ roleRef:
   kind: Role #this must be Role or ClusterRole
   name: luffy-admin # 这里的名称必须与你想要绑定的 Role 或 ClusterRole 名称一致
   apiGroup: rbac.authorization.k8s.io
+```
+
+
+
+```bash
+[root@k8s-master cert]# export KUBECONFIG=/root/cert/luffy.kubeconfig
+[root@k8s-master cert]# kubectl -n luffy get po
+Error from server (Forbidden): pods is forbidden: User "luffy-admin" cannot list resource "pods" in API group "" in the namespace "default"
+[root@k8s-master cert]# vi luffy-admin-role.yaml
+[root@k8s-master cert]# kubectl apply -f luffy-admin-role.yaml
+Error from server (Forbidden): error when retrieving current configuration of:
+Resource: "rbac.authorization.k8s.io/v1, Resource=roles", GroupVersionKind: "rbac.authorization.k8s.io/v1, Kind=Role"
+Name: "luffy-admin", Namespace: "luffy"
+from server for: "luffy-admin-role.yaml": roles.rbac.authorization.k8s.io "luffy-admin" is forbidden: User "luffy-admin" cannot get resource "roles" in API group "rbac.authorization.k8s.io" in the namespace "luffy"
+[root@k8s-master cert]# export KUBECONFIG=
+[root@k8s-master cert]# kubectl apply -f luffy-admin-role.yaml
+role.rbac.authorization.k8s.io/luffy-admin created
+[root@k8s-master cert]# kubectl apply -f luffy-admin-rolebinding.yaml
+rolebinding.rbac.authorization.k8s.io/luffy-admin created
+[root@k8s-master cert]# export KUBECONFIG=/root/cert/luffy.kubeconfig
+[root@k8s-master cert]# kubectl -n luffy get po
+NAME                      READY   STATUS             RESTARTS   AGE
+myblog-759fcb796d-p4ctm   1/1     Running            3          7d5h
+myblog-759fcb796d-t56t6   1/1     Running            3          7d5h
+myblog-759fcb796d-tttrv   1/1     Running            3          7d5h
+mysql-56b9db9c6-5cz5p     1/1     Running            3          7d5h
+pod-lifecycle             0/1     CrashLoopBackOff   270        7d7h
+[root@k8s-master cert]# kubectl -n luffy get deployments.apps
+NAME     READY   UP-TO-DATE   AVAILABLE   AGE
+myblog   3/3     3            3           7d5h
+mysql    1/1     1            1           7d5h
 ```
 
 
@@ -1167,10 +1381,10 @@ $ wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.4.
 131       - args:
 132         - --cert-dir=/tmp
 133         - --secure-port=4443
-134         - --kubelet-insecure-tls
+134         - --kubelet-insecure-tls   # 增加
 135         - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
 136         - --kubelet-use-node-status-port
-137         image: willdockerhub/metrics-server:v0.4.4
+137         image: willdockerhub/metrics-server:v0.4.4   # 修改国内地址
 138         imagePullPolicy: IfNotPresent
 ...
 ```
@@ -1178,11 +1392,9 @@ $ wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.4.
 执行安装：
 
 ```bash
-$ kubectl apply -f components.yaml
-
-$ kubectl -n kube-system get pods
-
-$ kubectl top nodes
+[root@k8s-master hpa]# kubectl apply -f components.yaml
+[root@k8s-master hpa]# kubectl -n kube-system get pods
+[root@k8s-master hpa]# kubectl top nodes
 ```
 
 ###### [kubelet的指标采集](http://49.7.203.222:3000/#/kubernetes-advanced/hpa?id=kubelet的指标采集)
@@ -1213,6 +1425,8 @@ Metrics数据流：
 Metrics Server是独立的一个服务，只能服务内部实现自己的api，是如何做到通过标准的kubernetes 的API格式暴露出去的？
 
 [kube-aggregator](https://github.com/kubernetes/kube-aggregator)
+
+
 
 ###### [kube-aggregator聚合器及Metric-Server的实现](http://49.7.203.222:3000/#/kubernetes-advanced/hpa?id=kube-aggregator聚合器及metric-server的实现)
 
@@ -1336,6 +1550,28 @@ spec:
 $ kubectl -n luffy autoscale deployment myblog --cpu-percent=10 --min=1 --max=3
 ```
 
+
+
+```bash
+[root@k8s-master hpa]# vi hpa-myblog.yaml
+[root@k8s-master hpa]# kubectl apply -f hpa-myblog.yaml
+horizontalpodautoscaler.autoscaling/hpa-myblog created
+[root@k8s-master hpa]# kubectl -n luffy get hpa
+NAME         REFERENCE           TARGETS          MINPODS   MAXPODS   REPLICAS   AGE
+hpa-myblog   Deployment/myblog   4%/80%, 2%/20%   1         3         1          43s
+															 内存使用率4%，cpu使用率2%
+[root@k8s-master hpa]# kubectl top pod -n luffy
+W1019 13:53:06.021793   10075 top_pod.go:140] Using json format to get metrics. Next release will switch to protocol-buffers, switch early by passing --use-protocol-buffers flag
+NAME                      CPU(cores)   MEMORY(bytes)
+myblog-759fcb796d-tttrv   0m           4Mi
+mysql-56b9db9c6-5cz5p     2m           203Mi
+pod-lifecycle             0m           0Mi
+```
+
+
+
+
+
 > Deployment对象必须配置requests的参数，不然无法获取监控数据，也无法通过HPA进行动态伸缩
 
 验证：
@@ -1343,15 +1579,15 @@ $ kubectl -n luffy autoscale deployment myblog --cpu-percent=10 --min=1 --max=3
 ```bash
 $ yum -y install httpd-tools
 $ kubectl -n luffy get svc myblog
-myblog   ClusterIP   10.104.245.225   <none>        80/TCP    6d18h
+myblog   ClusterIP   10.96.51.241   <none>        80/TCP    6d18h
 
 # 为了更快看到效果，先调整副本数为1
 $ kubectl -n luffy scale deploy myblog --replicas=1
 
 # 模拟1000个用户并发访问页面10万次
-$ ab -n 100000 -c 1000 http://10.104.245.225/blog/index/
+$ ab -n 100000 -c 1000 http://10.96.51.241/blog/index/
 
-$ kubectl get hpa
+$ kubectl get hpa -n luffy
 $ kubectl -n luffy get pods
 ```
 
@@ -1374,6 +1610,203 @@ The value for this option is a duration that specifies how long the autoscaler h
 架构图：
 
 ![img](4Kubernetes进阶实践.assets/hpa-prometheus-custom.png)
+
+
+
+
+
+扩展
+
+```bash
+[root@k8s-master ~]# wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.4.4/components.yaml
+[root@k8s-master ~]# cat components.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    k8s-app: metrics-server
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+  name: system:aggregated-metrics-reader
+rules:
+- apiGroups:
+  - metrics.k8s.io
+  resources:
+  - pods
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: system:metrics-server
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  - nodes
+  - nodes/stats
+  - namespaces
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server-auth-reader
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: extension-apiserver-authentication-reader
+subjects:
+- kind: ServiceAccount
+  name: metrics-server
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server:system:auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: metrics-server
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: system:metrics-server
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:metrics-server
+subjects:
+- kind: ServiceAccount
+  name: metrics-server
+  namespace: kube-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server
+  namespace: kube-system
+spec:
+  ports:
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: https
+  selector:
+    k8s-app: metrics-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: metrics-server
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      k8s-app: metrics-server
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        k8s-app: metrics-server
+    spec:
+      containers:
+      - args:
+        - --cert-dir=/tmp
+        - --secure-port=4443
+        - --kubelet-preferred-address-types=InternalIP,ExternalIP,Hostname
+        - --kubelet-use-node-status-port
+        image: k8s.gcr.io/metrics-server/metrics-server:v0.4.4
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /livez
+            port: https
+            scheme: HTTPS
+          periodSeconds: 10
+        name: metrics-server
+        ports:
+        - containerPort: 4443
+          name: https
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: https
+            scheme: HTTPS
+          periodSeconds: 10
+        securityContext:
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp-dir
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-cluster-critical
+      serviceAccountName: metrics-server
+      volumes:
+      - emptyDir: {}
+        name: tmp-dir
+---
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  labels:
+    k8s-app: metrics-server
+  name: v1beta1.metrics.k8s.io
+spec:
+  group: metrics.k8s.io
+  groupPriorityMinimum: 100
+  insecureSkipTLSVerify: true
+  service:
+    name: metrics-server
+    namespace: kube-system
+  version: v1beta1
+  versionPriority: 100
+```
 
 
 
