@@ -430,11 +430,36 @@ spec:
 
 > NoExecute
 
-###### [Cordon](http://49.7.203.222:3000/#/kubernetes-advanced/scheduler?id=cordon)
+###### [Cordon](http://49.7.203.222:3000/#/kubernetes-advanced/scheduler?id=cordon) 
+
+
 
 ```bash
-$ kubectl cordon k8s-slave2  # 设置slave2 不可调度   # 单词cordon 警戒线
-$ kubectl drain k8s-slave2   # 恢复调度
+# 影响最小，只会将node调为SchedulingDisabled
+# 之后再发创建pod，不会被调度到该节点
+# 旧有的pod不会受到影响，仍正常对外提供服务
+$ kubectl cordon k8s-slave2  # 停止调度  # 单词cordon 警戒线
+# 恢复调度
+$ kubectl uncordon k8s-node2 
+
+# drain 驱逐节点
+# 首先，驱逐node上的pod，其他节点重新创建
+# 接着，将节点调为** SchedulingDisabled**
+$ kubectl drain k8s-slave2   
+# 若node节点上存在daemonsets控制器创建的pod,则需要使用--ignore-daemonsets忽略错误错误警告
+# kubectl drain k8s-slave2 --ignore-daemonsets
+drain的参数
+--force
+当一些pod不是经 ReplicationController, ReplicaSet, Job, DaemonSet 或者 StatefulSet 管理的时候
+就需要用--force来强制执行 (例如:kube-proxy)
+ 
+--ignore-daemonsets
+无视DaemonSet管理下的Pod
+ 
+--delete-local-data
+如果有mount local volumn的pod，会强制杀掉该pod并把料清除掉
+另外如果跟本身的配置讯息有冲突时，drain就不会执行
+
 ```
 
 
@@ -1312,7 +1337,7 @@ $ kubectl -n luffy scale deployment myblog --replicas=2
 HPA的实现有两个版本：
 
 - autoscaling/v1，只包含了根据CPU指标的检测，稳定版本
-- autoscaling/v2beta1，支持根据memory或者用户自定义指标进行伸缩
+- autoscaling/v2beta2，支持根据memory或者用户自定义指标进行伸缩
 
 如何获取Pod的监控数据？
 
@@ -1341,6 +1366,45 @@ heapster时代，apiserver 会直接将metric请求通过apiserver proxy 的方�
 https://172.21.51.143:6443/apis/metrics.k8s.io/v1beta1/namespaces/<namespace-name>/pods/<pod-name>
 
 # https://172.21.51.143:6443/api/v1/namespaces/luffy/pods?limit=500
+
+# 安装jq命令。--nogpgcheck 跳过公钥检查安装
+[root@k8s-master deployment]# yum install -y jq --nogpgcheck
+[root@k8s-master deployment]# kubectl get pod -v=7
+[root@k8s-master deployment]# kubectl get --raw /api/v1/namespaces/default/pods|jq
+[root@k8s-master deployment]# kubectl -n luffy get po
+NAME                      READY   STATUS    RESTARTS   AGE
+myblog-76d54c49b6-26br5   1/1     Running   2          9h
+myblog-76d54c49b6-bfkvf   1/1     Running   0          5h14m
+mysql-864b4c85b5-9cdds    1/1     Running   0          9h
+[root@k8s-master deployment]# kubectl -n luffy get deploy
+NAME     READY   UP-TO-DATE   AVAILABLE   AGE
+myblog   2/2     2            2           9h
+mysql    1/1     1            1           9h
+[root@k8s-master deployment]# kubectl get --raw /apis/metrics.k8s.io/v1beta1/namespaces/luffy/pods/myblog-76d54c49b6-26br5|jq
+{
+  "kind": "PodMetrics",
+  "apiVersion": "metrics.k8s.io/v1beta1",
+  "metadata": {
+    "name": "myblog-76d54c49b6-26br5",
+    "namespace": "luffy",
+    "selfLink": "/apis/metrics.k8s.io/v1beta1/namespaces/luffy/pods/myblog-76d54c49b6-26br5",
+    "creationTimestamp": "2022-10-19T19:00:03Z"
+  },
+  "timestamp": "2022-10-19T18:59:17Z",
+  "window": "30s",
+  "containers": [
+    {
+      "name": "myblog", # 容器名
+      "usage": {
+        "cpu": "761897n",  # cpu使用量
+        "memory": "68432Ki"# 内存使用量
+      }
+    }
+  ]
+}
+
+# hpa 获取api数据是由 metrics-server提供的
+# hpa -> /apis/metrics.k8s.io/v1beta1/namespaces/luffy/pods/myblog-76d54c49b6-26br5 <- metrics-server
 ```
 
 目前的采集流程：
@@ -1408,6 +1472,11 @@ $ wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.4.
 
 ```bash
 $ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6InhXcmtaSG5ZODF1TVJ6dUcycnRLT2c4U3ZncVdoVjlLaVRxNG1wZ0pqVmcifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlcm5ldGVzLWRhc2hib2FyZCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi1xNXBueiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6ImViZDg2ODZjLWZkYzAtNDRlZC04NmZlLTY5ZmE0ZTE1YjBmMCIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlcm5ldGVzLWRhc2hib2FyZDphZG1pbiJ9.iEIVMWg2mHPD88GQ2i4uc_60K4o17e39tN0VI_Q_s3TrRS8hmpi0pkEaN88igEKZm95Qf1qcN9J5W5eqOmcK2SN83Dd9dyGAGxuNAdEwi0i73weFHHsjDqokl9_4RGbHT5lRY46BbIGADIphcTeVbCggI6T_V9zBbtl8dcmsd-lD_6c6uC2INtPyIfz1FplynkjEVLapp_45aXZ9IMy76ljNSA8Uc061Uys6PD3IXsUD5JJfdm7lAt0F7rn9SdX1q10F2lIHYCMcCcfEpLr4Vkymxb4IU4RCR8BsMOPIO_yfRVeYZkG4gU2C47KwxpLsJRrTUcUXJktSEPdeYYXf9w" https://localhost:10250/metrics
+
+---------------
+# 获取token  会有多个token 复制 Name:admin-token-7clrz 的token
+[root@k8s-master deployment]# kubectl -n kubernetes-dashboard describe secrets
+[root@k8s-master deployment]# curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6Ik9VMi1HX3FFMlBUT193OUo3ZWI4eDh3aE9pc0dTYXMyQWRMNnRHNHJtMWsifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlcm5ldGVzLWRhc2hib2FyZCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi03Y2xyeiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjhjNjRkMjFmLWJkYzYtNDYxMC05YmIxLWRkYjIyMDE3ZmVkMCIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlcm5ldGVzLWRhc2hib2FyZDphZG1pbiJ9.a7UIMu1PfZ3e4j51R2qIiWZm0yZgdn5TNoUOwNLtMKdGX0LsUQP7NhUJQY_uX4ymtjqQj3aBXY7t3fWamGSBxqkf7nD5s34ibBES-ve6IXUNgQYQg3o1kJWwen20VzjCcQbNcq8Ba6W7Zz37kx6IQQNCAq41Tzq030APZ2JsGnzL8HIkHxQ5SAu8HzKsUTg1Zu7r6aDh97CwRych3Wcr09BzF6R0gB3Gb2KvqAbWItusysdt1YYw_Vmu7YbUdmi437Zcsw6JBLDLrdnSEs4AYyXdSG5_63OevHKaWpDjx4uTCawt7fhP-MpzktOctUK-RpCAAp9dbr4VINwbOj51Tg" https://localhost:10250/metrics
 ```
 
 kubelet虽然提供了 metric 接口，但实际监控逻辑由内置的cAdvisor模块负责，早期的时候，cadvisor是单独的组件，从k8s 1.12开始，cadvisor 监听的端口在k8s中被删除，所有监控数据统一由Kubelet的API提供。
@@ -1419,6 +1488,15 @@ cgroup文件中的值是监控数据的最终来源
 Metrics数据流：
 
 ![img](4Kubernetes进阶实践.assets/hap-flow.webp)
+
+
+
+```bash
+# cgroup 中容器使用量数据文件位置
+[root@k8s-master deployment]# ll /sys/fs/cgroup/memory/kubepods/burstable/pod123c0877-3d9e-4d00-bbc8-5d3d894fcf2a/memory.usage_in_bytes
+```
+
+
 
 思考：
 
@@ -2042,6 +2120,35 @@ nfs-pv   1Gi        RWO            Retain           Bound    default/pvc-nfs
 #访问模式，storage大小（pvc大小需要小于pv大小），以及 PV 和 PVC 的 storageClassName 字段必须一样，这样才能够进行绑定。
 
 #PersistentVolumeController会不断地循环去查看每一个 PVC，是不是已经处于 Bound（已绑定）状态。如果不是，那它就会遍历所有的、可用的 PV，并尝试将其与未绑定的 PVC 进行绑定，这样，Kubernetes 就可以保证用户提交的每一个 PVC，只要有合适的 PV 出现，它就能够很快进入绑定状态。而所谓将一个 PV 与 PVC 进行“绑定”，其实就是将这个 PV 对象的名字，填在了 PVC 对象的 spec.volumeName 字段上。
+[root@k8s-master pvc]# kubectl edit pvc pvc-nfs #查看到
+
+[root@k8s-master pvc]# kubectl get pv
+NAME     CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM             STORAGECLASS   REASON   AGE
+nfs-pv   1Gi        RWX            Retain           Released   default/pvc-nfs                           34m
+[root@k8s-master pvc]# vi pvc.yaml  # 修改名字pvc-nfs1
+[root@k8s-master pvc]# kubectl create -f pvc.yaml
+persistentvolumeclaim/pvc-nfs1 created
+[root@k8s-master pvc]# kubectl get pvc  # 状态是Pending
+NAME       STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+pvc-nfs1   Pending                                                     13s
+[root@k8s-master pvc]# kubectl get pv
+NAME     CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM             STORAGECLASS   REASON   AGE
+nfs-pv   1Gi        RWX            Retain           Released   default/pvc-nfs                           36m
+[root@k8s-master pvc]# kubectl edit pv nfs-pv # 删除掉 claimRef 部分
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: pvc-nfs
+    namespace: default
+    resourceVersion: "394403"
+    uid: 6bc2b18c-a918-440b-9513-6a6538795688
+[root@k8s-master pvc]# kubectl get pv   # Available状态是可以绑定的状态
+NAME     CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM   STORAGECLASS   REASON   AGE
+nfs-pv   1Gi        RWX            Retain           Available                                   39m
+[root@k8s-master pvc]# kubectl get pv  # 发现已被绑定上
+NAME     CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM              STORAGECLASS   REASON   AGE
+nfs-pv   1Gi        RWX            Retain           Bound    default/pvc-nfs1                           39m
+
 
 # 查看nfs数据目录
 $ ls /nfsdata
@@ -2084,8 +2191,23 @@ spec:
 $ kubectl create -f deployment.yaml
 
 # 查看容器/usr/share/nginx/html目录
+[root@k8s-master pvc]# kubectl get po
+NAME                      READY   STATUS    RESTARTS   AGE
+nfs-pvc-7bf65c788-h2sqk   1/1     Running   0          5s
+[root@k8s-master pvc]#
+[root@k8s-master pvc]# kubectl exec -ti nfs-pvc-7bf65c788-h2sqk -- bash
+OCI runtime exec failed: exec failed: unable to start container process: exec: "bash": executable file not found in $PATH: unknown
+command terminated with exit code 126
+[root@k8s-master pvc]# kubectl exec -ti nfs-pvc-7bf65c788-h2sqk -- /bin/sh
+/ # ls /usr/share/nginx/html  #这个目录就是挂载的nfs
 
 # 删除pvc
+[root@k8s-master pvc]# kubectl delete deploy nfs-pvc
+deployment.apps "nfs-pvc" deleted
+[root@k8s-master pvc]# kubectl delete pvc pvc-nfs
+persistentvolumeclaim "pvc-nfs" deleted
+[root@k8s-master pvc]# kubectl delete pv nfs-pv
+persistentvolume "nfs-pv" deleted
 ```
 
 ###### [storageClass实现动态挂载](http://49.7.203.222:3000/#/kubernetes-advanced/pv?id=storageclass实现动态挂载)
@@ -2108,7 +2230,44 @@ unexpected error getting claim reference: selfLink was empty, can't  make refere
 
 ```bash
 - --feature-gates=RemoveSelfLink=false
+--------------------操作记录
+[root@k8s-master pvc]# vi /etc/kubernetes/manifests/kube-apiserver.yaml
+spec:
+  containers:
+  - command:
+    - kube-apiserver
+    - --advertise-address=10.211.55.25
+    - --allow-privileged=true
+    - --authorization-mode=Node,RBAC
+    - --feature-gates=RemoveSelfLink=false #添加内容
+
+[root@k8s-master pvc]# kubectl get po  # 等待重启
+[root@k8s-master pvc]# kubectl get po -n luffy
+NAME                      READY   STATUS    RESTARTS   AGE
+myblog-76d54c49b6-26br5   1/1     Running   2          33h
+[root@k8s-master pvc]# kubectl -n luffy get po myblog-76d54c49b6-26br5 -oyaml
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: "2022-10-19T09:23:58Z"
+  generateName: myblog-76d54c49b6-
+  labels:
+    app: myblog
+    pod-template-hash: 76d54c49b6
+  name: myblog-76d54c49b6-26br5
+  namespace: luffy
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: ReplicaSet
+    name: myblog-76d54c49b6
+    uid: c6c2957c-8ac1-4ba9-88ba-a731652b854c
+  resourceVersion: "267739"
+  selfLink: /api/v1/namespaces/luffy/pods/myblog-76d54c49b6-26br5 # 这里会多一个selfLink
+```
 provisioner.yaml
+```bash
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -2143,15 +2302,17 @@ spec:
             - name: PROVISIONER_NAME
               value: luffy.com/nfs
             - name: NFS_SERVER
-              value: 172.21.51.55
+              value: 172.21.51.55   #修改nfs ip
             - name: NFS_PATH  
               value: /data/k8s
       volumes:
         - name: nfs-client-root
           nfs:
-            server: 172.21.51.55
+            server: 172.21.51.55  #修改nfs ip
             path: /data/k8s
+```
 rbac.yaml
+```bash
 kind: ServiceAccount
 apiVersion: v1
 metadata:
@@ -2215,7 +2376,9 @@ roleRef:
   kind: Role
   name: leader-locking-nfs-client-provisioner
   apiGroup: rbac.authorization.k8s.io
+```
 storage-class.yaml
+```bash
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -2225,7 +2388,45 @@ metadata:
 provisioner: luffy.com/nfs
 parameters:
   archiveOnDelete: "true"
+```
+```bash
+
+# kubectl create ns nfs-provisioner
+[root@k8s-master pvc]# kubectl create -f  provisioner.yaml
+[root@k8s-master pvc]# kubectl create -f rbac.yaml
+[root@k8s-master pvc]# kubectl create -f storage_class.yaml
+
+[root@k8s-master pvc]# kubectl apply -f test_pvc.yaml
+[root@k8s-master pvc]# kubectl get pvc
+NAME         STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+test-claim   Pending                                      nfs            8s
+[root@k8s-master pvc]# kubectl -n nfs-provisioner get po
+NAME                                     READY   STATUS    RESTARTS   AGE
+nfs-client-provisioner-bf64d8dc4-87dh8   1/1     Running   0          3m58s
+[root@k8s-master pvc]# kubectl -n nfs-provisioner logs -f nfs-client-provisioner-bf64d8dc4-87dh8
+I1020 18:54:55.548746       1 leaderelection.go:185] attempting to acquire leader lease  nfs-provisioner/luffy.com-nfs...
+E1020 18:54:55.569340       1 event.go:259] Could not construct reference to: '&v1.Endpoints{TypeMeta:v1.TypeMeta{Kind:"", APIVersion:""}, ObjectMeta:v1.ObjectMeta{Name:"luffy.com-nfs", GenerateName:"", Namespace:"nfs-provisioner", SelfLink:"", UID:"206aec52-9773-441a-ba54-26a8b26cb649", ResourceVersion:"414661", Generation:0, CreationTimestamp:v1.Time{Time:time.Time{wall:0x0, ext:63801888894, loc:(*time.Location)(0x1956800)}}, DeletionTimestamp:(*v1.Time)(nil), DeletionGracePeriodSeconds:(*int64)(nil), Labels:map[string]string(nil), Annotations:map[string]string{"control-plane.alpha.kubernetes.io/leader":"{\"holderIdentity\":\"nfs-client-provisioner-bf64d8dc4-87dh8_affa179f-50a8-11ed-950d-9a157f6f5bde\",\"leaseDurationSeconds\":15,\"acquireTime\":\"2022-10-20T18:54:55Z\",\"renewTime\":\"2022-10-20T18:54:55Z\",\"leaderTransitions\":0}"}, OwnerReferences:[]v1.OwnerReference(nil), Initializers:(*v1.Initializers)(nil), Finalizers:[]string(nil), ClusterName:""}, Subsets:[]v1.EndpointSubset(nil)}' due to: 'selfLink was empty, can't make reference'. Will not report event: 'Normal' 'LeaderElection' 'nfs-client-provisioner-bf64d8dc4-87dh8_affa179f-50a8-11ed-950d-9a157f6f5bde became leader'
+I1020 18:54:55.569458       1 leaderelection.go:194] successfully acquired lease nfs-provisioner/luffy.com-nfs
+I1020 18:54:55.569521       1 controller.go:631] Starting provisioner controller luffy.com/nfs_nfs-client-provisioner-bf64d8dc4-87dh8_affa179f-50a8-11ed-950d-9a157f6f5bde!
+I1020 18:54:55.670797       1 controller.go:680] Started provisioner controller luffy.com/nfs_nfs-client-provisioner-bf64d8dc4-87dh8_affa179f-50a8-11ed-950d-9a157f6f5bde!
+I1020 18:57:59.648099       1 controller.go:987] provision "default/test-claim" class "nfs": started
+E1020 18:57:59.657397       1 controller.go:1004] provision "default/test-claim" class "nfs": unexpected error getting claim reference: selfLink was empty, can't make reference
+# 回到上面做部署前的api-server参数添加
+
+[root@k8s-master pvc]# kubectl get pv
+NAME                                       CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                STORAGECLASS   REASON   AGE
+pvc-fa871a75-406d-4584-81ba-a39e0970da10   1Mi        RWX            Delete           Bound    default/test-claim   nfs                     6m31s
+[root@k8s-master pvc]# kubectl get pvc
+NAME         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+test-claim   Bound    pvc-fa871a75-406d-4584-81ba-a39e0970da10   1Mi        RWX            nfs            11m
+
+```
+
+
+
 pvc.yaml
+
+```bash
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
@@ -2911,7 +3112,7 @@ net-conf.json: |
     {
       "Network": "10.244.0.0/16",
       "Backend": {
-        "Type": "host-gw"
+        "Type": "host-gw"   #修改
       }
     }
 kind: ConfigMap
@@ -2955,6 +3156,76 @@ Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
 - 到达 `cni0` 当中的 IP 包通过匹配节点 k8s-slave1 的路由表发现通往 10.244.2.19 的 IP 包应该使用172.21.51.55这个网关进行转发
 - 包到达k8s-slave2节点（172.21.51.55）节点的eth0网卡，根据该节点的路由规则，转发给cni0网卡
 - `cni0`将 IP 包转发给连接在 `cni0` 上的 pod-b
+
+
+
+```bash
+kube-flannel v0.19.2版本操作记录
+[root@k8s-master ~]# vi kube-flannel.yml
+     82   net-conf.json: |
+     83     {
+     84       "Network": "10.244.0.0/16",
+     85       "Backend": {
+     86         "Type": "host-gw"  #修改
+     87       }
+     88     }
+[root@k8s-master ~]# kubectl apply -f kube-flannel.yml
+
+# 重建Flannel的Pod
+[root@k8s-master ~]# kubectl -n kube-flannel get po
+NAME                    READY   STATUS    RESTARTS   AGE
+kube-flannel-ds-dsjmv   1/1     Running   9          9d
+kube-flannel-ds-m5ktm   1/1     Running   8          9d
+kube-flannel-ds-t6mrz   1/1     Running   6          9d
+[root@k8s-master ~]# kubectl -n kube-flannel delete po kube-flannel-ds-dsjmv kube-flannel-ds-m5ktm kube-flannel-ds-t6mrz
+[root@k8s-master ~]# kubectl -n kube-flannel logs -f kube-flannel-ds-bp7tm
+I1020 02:47:11.776468       1 main.go:207] CLI flags config: {etcdEndpoints:http://127.0.0.1:4001,http://127.0.0.1:2379 etcdPrefix:/coreos.com/network etcdKeyfile: etcdCertfile: etcdCAFile: etcdUsername: etcdPassword: version:false kubeSubnetMgr:true kubeApiUrl: kubeAnnotationPrefix:flannel.alpha.coreos.com kubeConfigFile: iface:[eth0] ifaceRegex:[] ipMasq:true ifaceCanReach: subnetFile:/run/flannel/subnet.env publicIP: publicIPv6: subnetLeaseRenewMargin:60 healthzIP:0.0.0.0 healthzPort:0 iptablesResyncSeconds:5 iptablesForwardRules:true netConfPath:/etc/kube-flannel/net-conf.json setNodeNetworkUnavailable:true}
+W1020 02:47:11.776579       1 client_config.go:614] Neither --kubeconfig nor --master was specified.  Using the inClusterConfig.  This might not work.
+I1020 02:47:11.883481       1 kube.go:120] Waiting 10m0s for node controller to sync
+I1020 02:47:11.883521       1 kube.go:401] Starting kube subnet manager
+I1020 02:47:12.976013       1 kube.go:127] Node controller sync successful
+I1020 02:47:12.976081       1 main.go:227] Created subnet manager: Kubernetes Subnet Manager - k8s-slave1
+I1020 02:47:12.976093       1 main.go:230] Installing signal handlers
+I1020 02:47:12.976455       1 main.go:467] Found network config - Backend type: host-gw
+I1020 02:47:12.978362       1 match.go:259] Using interface with name eth0 and address 10.211.55.26
+I1020 02:47:12.978393       1 match.go:281] Defaulting external address to interface address (10.211.55.26)
+I1020 02:47:13.074899       1 kube.go:350] Setting NodeNetworkUnavailable
+I1020 02:47:13.082687       1 main.go:345] Setting up masking rules
+I1020 02:47:13.283635       1 main.go:366] Changing default FORWARD chain policy to ACCEPT
+I1020 02:47:13.283814       1 main.go:379] Wrote subnet file to /run/flannel/subnet.env
+I1020 02:47:13.283825       1 main.go:383] Running backend.
+I1020 02:47:13.284439       1 main.go:404] Waiting for all goroutines to exit
+I1020 02:47:13.284495       1 route_network.go:55] Watching for new subnet leases
+W1020 02:47:13.285026       1 route_network.go:87] Ignoring non-host-gw subnet: type=vxlan
+I1020 02:47:13.285040       1 route_network.go:92] Subnet added: 10.244.0.0/24 via 10.211.55.25
+W1020 02:47:13.285272       1 route_network.go:151] Replacing existing route to {Ifindex: 4 Dst: 10.244.0.0/24 Src: <nil> Gw: 10.244.0.0 Flags: [onlink] Table: 254 Realm: 0} with {Ifindex: 2 Dst: 10.244.0.0/24 Src: <nil> Gw: 10.211.55.25 Flags: [] Table: 0 Realm: 0}
+I1020 02:47:13.576997       1 iptables.go:177] bootstrap done
+I1020 02:47:13.578330       1 iptables.go:177] bootstrap done
+I1020 02:47:19.624118       1 route_network.go:92] Subnet added: 10.244.2.0/24 via 10.211.55.27
+W1020 02:47:19.624715       1 route_network.go:151] Replacing existing route to {Ifindex: 4 Dst: 10.244.2.0/24 Src: <nil> Gw: 10.244.2.0 Flags: [onlink] Table: 254 Realm: 0} with {Ifindex: 2 Dst: 10.244.2.0/24 Src: <nil> Gw: 10.211.55.27 Flags: [] Table: 0 Realm: 0}
+[root@k8s-master ~]# route -n
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+0.0.0.0         10.211.55.1     0.0.0.0         UG    100    0        0 eth0
+10.211.55.0     0.0.0.0         255.255.255.0   U     100    0        0 eth0
+10.244.0.0      0.0.0.0         255.255.255.0   U     0      0        0 cni0
+10.244.1.0      10.211.55.26    255.255.255.0   UG    0      0        0 eth0   #节点1ip
+10.244.2.0      10.211.55.27    255.255.255.0   UG    0      0        0 eth0   #节点2ip
+172.17.0.0      0.0.0.0         255.255.0.0     U     0      0        0 docker0
+[root@k8s-master ~]# kubectl -n luffy get po -owide
+NAME                      READY   STATUS    RESTARTS   AGE    IP            NODE         NOMINATED NODE   READINESS GATES
+myblog-76d54c49b6-26br5   1/1     Running   2          20h    10.244.1.37   k8s-slave1   <none>           <none>
+myblog-76d54c49b6-bfkvf   1/1     Running   0          16h    10.244.1.42   k8s-slave1   <none>           <none>
+myblog-76d54c49b6-grlw2   1/1     Running   0          153m   10.244.2.28   k8s-slave2   <none>           <none>
+myblog-76d54c49b6-ll2cr   1/1     Running   0          153m   10.244.2.29   k8s-slave2   <none>           <none>
+myblog-76d54c49b6-rrxfr   1/1     Running   0          153m   10.244.2.30   k8s-slave2   <none>           <none>
+mysql-864b4c85b5-9cdds    1/1     Running   0          20h    10.244.1.40   k8s-slave1   <none>           <none>
+[root@k8s-master ~]# kubectl exec myblog-76d54c49b6-26br5 -- ping 10.244.2.28
+Error from server (NotFound): pods "myblog-76d54c49b6-26br5" not found
+[root@k8s-master ~]# kubectl -n luffy exec myblog-76d54c49b6-26br5 -- ping 10.244.2.28
+PING 10.244.2.28 (10.244.2.28) 56(84) bytes of data.
+64 bytes from 10.244.2.28: icmp_seq=1 ttl=62 time=0.460 ms
+```
 
 
 
@@ -3065,7 +3336,35 @@ $ kubectl create namespace wordpress
 $ helm -n wordpress install wordpress stable/wordpress --set mariadb.primary.persistence.enabled=false --set service.type=ClusterIP --set ingress.enabled=true --set persistence.enabled=false --set ingress.hostname=wordpress.luffy.com
 
 $ helm -n wordpress ls
+[root@k8s-master helm3]# helm -n wordpress ls  # 一条信息就是release   chart的一次部署就一条release
+NAME     	NAMESPACE	REVISION	UPDATED                                	STATUS  	CHART           	APP VERSION
+wordpress	wordpress	1       	2022-10-21 13:41:45.706167389 +0800 CST	deployed	wordpress-15.2.6	6.0.3
+
 $ kubectl -n wordpress get all 
+
+[root@k8s-master helm3]# kubectl -n wordpress get po
+NAME                        READY   STATUS    RESTARTS   AGE
+wordpress-745967ff4-cmnj9   1/1     Running   0          16m
+wordpress-mariadb-0         1/1     Running   0          16m
+[root@k8s-master helm3]# kubectl -n wordpress get svc
+NAME                TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)          AGE
+wordpress           ClusterIP   10.101.126.165   <none>        80/TCP,443/TCP   17m
+wordpress-mariadb   ClusterIP   10.102.7.97      <none>        3306/TCP         17m
+[root@k8s-master helm3]# kubectl -n wordpress get ing
+NAME        CLASS    HOSTS                 ADDRESS   PORTS   AGE
+wordpress   <none>   wordpress.luffy.com             80      17m
+[root@k8s-master helm3]# kubectl -n wordpress get cm
+NAME                DATA   AGE
+kube-root-ca.crt    1      18m
+wordpress-mariadb   1      18m
+[root@k8s-master helm3]# kubectl -n wordpress get secrets
+NAME                              TYPE                                  DATA   AGE
+default-token-ck95p               kubernetes.io/service-account-token   3      19m
+sh.helm.release.v1.wordpress.v1   helm.sh/release.v1                    1      18m
+wordpress                         Opaque                                1      18m
+wordpress-mariadb                 Opaque                                2      18m
+wordpress-mariadb-token-tbllp     kubernetes.io/service-account-token   3      18m
+
 
 # 从chart仓库中把chart包下载到本地
 $ helm pull stable/wordpress
