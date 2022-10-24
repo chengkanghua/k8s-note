@@ -30,7 +30,7 @@ json-file格式，docker会默认将标准和错误输出保存为宿主机的�
 /var/lib/docker/containers/<container-id>/<container-id>-json.log
 ```
 
-并且可以设置日志轮转：
+并且可以设置日志轮转： 设置的位置 /etc/docker/daemon.json
 
 ```json
 {
@@ -147,6 +147,8 @@ json-file格式，docker会默认将标准和错误输出保存为宿主机的�
 > fluentd-pilot
 
 方案二：日志使用开源的Agent进行收集（EFK方案），适用范围广，可以满足绝大多数日志收集、展示的需求。
+
+[Docker日志收集新方案：fluent-pilot - h3399](https://www.h3399.cn/201702/43019.html)
 
 
 
@@ -447,10 +449,21 @@ fluent.conf
 启动服务，追加文件内容：
 
 ```bash
+# A终端操作
 $ docker run -u root --rm -ti quay.io/fluentd_elasticsearch/fluentd:v3.1.0 sh
 / # cat /etc/fluent/fluent.conf
 / # mkdir /etc/fluent/config.d
-/ # fluentd -c /etc/fluent/fluent.conf
+# 在B终端 拷贝配置文件进这个容器
+[root@k8s-master ~]# docker ps |grep fluent
+e834e98ec435   quay.io/fluentd_elasticsearch/fluentd:v3.1.0          "sh"                     4 minutes ago   Up 4 minutes   80/tcp    optimistic_dewdney
+[root@k8s-master ~]# mkdir efk;cd efk
+[root@k8s-master efk]# vi fluent.conf
+[root@k8s-master efk]# docker cp fluent.conf e834e98ec435:/etc/fluent/config.d/
+# A终端操作
+/ # fluentd -c /etc/fluent/fluent.conf  #阻塞 观察终端的输出信息
+2022-10-23 15:23:44.828697769 +0000 nginx_access: {"serverIp":"53.49.146.149","timestamp":"1561620585.973","respondTime":"0.005","httpCode":"502","eventTime":"27/Jun/2019:15:29:45 +0800","clientIp":"178.73.215.171","clientPort":"33337","method":"GET","protocol":"https"}
+
+# 在 在B终端模拟追加日志信息
 / # echo '53.49.146.149 1561620585.973 0.005 502 [27/Jun/2019:15:29:45 +0800] 178.73.215.171 33337 GET https' >>/var/log/nginx/access.log
 ```
 
@@ -487,6 +500,29 @@ $ docker run -u root --rm -ti quay.io/fluentd_elasticsearch/fluentd:v3.1.0 sh
      @type stdout
    </match>
 </label>
+---------------------操作记录   把配置文件修改成上面的，重启启动查看
+# b终端
+[root@k8s-master efk]# vi fluent.conf
+[root@k8s-master efk]# docker cp fluent.conf e834e98ec435:/etc/fluent/config.d/
+# A终端
+^C
+^C2022-10-23 15:37:45 +0000 [info]: Received graceful stop
+2022-10-23 15:37:46 +0000 [info]: #0 fluentd worker is now stopping worker=0
+2022-10-23 15:37:46.818230770 +0000 fluent.info: {"worker":0,"message":"fluentd worker is now stopping worker=0"}
+2022-10-23 15:37:46 +0000 [info]: #0 shutting down fluentd worker worker=0
+2022-10-23 15:37:46 +0000 [info]: #0 shutting down input plugin type=:tail plugin_id="object:6f4"
+2022-10-23 15:37:46 +0000 [info]: #0 shutting down output plugin type=:stdout plugin_id="object:6a4"
+2022-10-23 15:37:46 +0000 [info]: #0 shutting down output plugin type=:stdout plugin_id="object:6e0"
+2022-10-23 15:37:46 +0000 [info]: #0 shutting down filter plugin type=:parser plugin_id="object:6b8"
+2022-10-23 15:37:46 +0000 [info]: Worker 0 finished with status 0
+root@e834e98ec435:/etc/fluent# fluentd -c /etc/fluent/fluent.conf  #重新启动
+# b终端
+[root@k8s-master efk]# docker exec -ti e834e98ec435 /bin/sh
+# echo '53.49.146.149 1561620585.973 0.005 502 [27/Jun/2019:15:29:45 +0800] 178.73.215.171 33337 GET https' >>/var/log/nginx/access.log
+# echo '53.49.146.149 1561620585.973 0.005 502 [27/Jun/2019:15:29:45 +0800] 178.73.215.171 33337 GET https' >>/var/log/nginx/access.log
+# A终端
+2022-10-23 15:39:07.763463977 +0000 nginx_access: {"serverIp":"53.49.146.149","timestamp":"1561620585.973","respondTime":"0.005","httpCode":"502","eventTime":"27/Jun/2019:15:29:45 +0800","clientIp":"178.73.215.171","clientPort":"33337","method":"GET","protocol":"https","host_name":"e834e98ec435","my_key":"my_val","tls":"true"}
+2022-10-23 15:39:08.625421527 +0000 nginx_access: {"serverIp":"53.49.146.149","timestamp":"1561620585.973","respondTime":"0.005","httpCode":"502","eventTime":"27/Jun/2019:15:29:45 +0800","clientIp":"178.73.215.171","clientPort":"33337","method":"GET","protocol":"https","host_name":"e834e98ec435","my_key":"my_val","tls":"true"}
 ```
 
 
@@ -504,7 +540,7 @@ $ docker run -u root --rm -ti quay.io/fluentd_elasticsearch/fluentd:v3.1.0 sh
 `application.yml`的内容为：
 
 ```bash
-$ cat application.yml
+cat > application.yml <<\EOF
 spring:
   application:
     name: svca-service
@@ -519,6 +555,7 @@ spring:
         max-interval: 10000
         multiplier: 2
         max-attempts: 10
+EOF
 ```
 
 该配置文件在k8s中可以通过configmap来管理，通常我们有如下两种方式来管理配置文件：
@@ -563,10 +600,10 @@ spring:
   $ kubectl apply -f application-config.yaml
   ```
 
-准备一个`demo-deployment.yaml`文件，挂载上述configmap到`/etc/application/`中
+准备一个`demo-deployment.yaml`文件，挂载上述configmap到容器里的`/etc/application/`中
 
 ```bash
-$ cat demo-deployment.yaml
+cat > demo-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -592,30 +629,18 @@ spec:
         volumeMounts:
         - mountPath: "/etc/application"
           name: config
+EOF
 ```
 
 创建并查看：
 
 ```bash
 $ kubectl apply -f demo-deployment.yaml
-```
 
-修改configmap文件的内容，观察pod中是否自动感知变化：
-
-```bash
-$ kubectl edit cm application-config
-```
-
-> 整个configmap文件直接挂载到pod中，若configmap变化，pod会自动感知并拉取到pod内部。
->
-> 但是pod内的进程不会自动重启，所以很多服务会实现一个内部的reload接口，用来加载最新的配置文件到进程中。
-
-###### [场景二：多文件挂载](http://49.7.203.222:3000/#/logging/using-configmap?id=场景二：多文件挂载)
-
-假如有多个配置文件，都需要挂载到pod内部，且都在一个目录中
-
-```bash
-$ cat application.yml
+[root@k8s-master helm3]# kubectl get  po
+NAME                       READY   STATUS    RESTARTS   AGE
+demo-67c7c99d47-vvltn      1/1     Running   0          35s
+[root@k8s-master helm3]# kubectl exec demo-67c7c99d47-vvltn -- cat /etc/application/application.yml
 spring:
   application:
     name: svca-service
@@ -630,8 +655,44 @@ spring:
         max-interval: 10000
         multiplier: 2
         max-attempts: 10
+```
 
-$ cat supervisord.conf
+修改configmap文件的内容，观察pod中是否自动感知变化：
+
+```bash
+$ kubectl edit cm application-config
+
+[root@k8s-master helm3]# kubectl edit cm application-config  #修改了端口 8889
+Edit cancelled, no changes made.
+[root@k8s-master helm3]# kubectl exec demo-67c7c99d47-vvltn -- cat /etc/application/application.yml # 30秒之后查看也改变了
+```
+
+> 整个configmap文件直接挂载到pod中，若configmap变化，pod会自动感知并拉取到pod内部。
+>
+> 但是pod内的进程不会自动重启，所以很多服务会实现一个内部的reload接口，用来加载最新的配置文件到进程中。
+
+###### [场景二：多文件挂载](http://49.7.203.222:3000/#/logging/using-configmap?id=场景二：多文件挂载)
+
+假如有多个配置文件，都需要挂载到pod内部，且都在一个目录中
+
+```bash
+cat > application.yml <<\EOF
+spring:
+  application:
+    name: svca-service
+  cloud:
+    config:
+      uri: http://config:8888
+      fail-fast: true
+      username: user
+      password: ${CONFIG_SERVER_PASSWORD:password}
+      retry:
+        initial-interval: 2000
+        max-interval: 10000
+        multiplier: 2
+        max-attempts: 10
+EOF
+cat > supervisord.conf <<EOF
 [unix_http_server]
 file=/var/run/supervisor.sock
 chmod=0700
@@ -644,6 +705,7 @@ loglevel=info
 pidfile=/var/run/supervisord.pid
 childlogdir=/var/cluster_conf_agent/logs/supervisor
 nodaemon=false
+EOF
 ```
 
 同样可以使用两种方式创建：
@@ -662,6 +724,14 @@ $ kubectl get cm application-config -oyaml
 $ kubectl exec demo-55c649865b-gpkgk ls /etc/application/
 application.yml
 supervisord.conf
+
+[root@k8s-master helm3]# kubectl get po
+NAME                       READY   STATUS    RESTARTS   AGE
+demo-67c7c99d47-vvltn      1/1     Running   0          10m
+nfs-pvc-7cd57855b4-bb7wl   1/1     Running   2          2d21h
+[root@k8s-master helm3]# kubectl exec demo-67c7c99d47-vvltn -- ls /etc/application/
+application.yml
+supervisord.conf
 ```
 
 此时，是挂载到pod内的空目录中`/etc/application`，假如想挂载到pod已存在的目录中，比如：
@@ -675,7 +745,7 @@ locale
 更改deployment的挂载目录：
 
 ```bash
-$ cat demo-deployment.yaml
+cat > demo-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -701,6 +771,7 @@ spec:
         volumeMounts:
         - mountPath: "/etc/profile.d"
           name: config
+EOF
 ```
 
 重建pod
@@ -724,7 +795,7 @@ supervisord.conf
 configmap保持不变，修改deployment文件：
 
 ```bash
-$ cat demo-deployment.yaml
+cat > demo-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -759,6 +830,7 @@ spec:
         - mountPath: "/etc/profile.d/supervisord.conf"
           name: config
           subPath: supervisord
+EOF
 ```
 
 测试挂载：
@@ -773,6 +845,20 @@ $ kubectl exec demo-78489c754-shjhz ls /etc/profile.d/
 supervisord.conf
 color_prompt
 locale
+
+--------操作记录
+[root@k8s-master helm3]# kubectl apply -f demo-deployment.yaml
+deployment.apps/demo configured
+[root@k8s-master helm3]# kubectl get po
+NAME                       READY   STATUS    RESTARTS   AGE
+demo-7f7c84459f-tf98g      1/1     Running   0          22s
+[root@k8s-master helm3]# kubectl exec demo-7f7c84459f-tf98g -- ls /etc/application
+application.yml
+[root@k8s-master helm3]# kubectl exec demo-7f7c84459f-tf98g -- ls /etc/profile.d/
+README
+color_prompt.sh.disabled
+locale.sh
+supervisord.conf
 ```
 
 > 使用subPath挂载到Pod内部的文件，不会自动感知原有ConfigMap的变更
@@ -796,6 +882,7 @@ locale
 使用Deployment创建多副本的pod的情况：
 
 ```yaml
+cat > demo.dpl.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -818,21 +905,23 @@ spec:
         image: nginx:alpine
         ports:
         - containerPort: 80
+EOF
 ```
 
 使用StatefulSet创建多副本pod的情况：
 
 ```yaml
+cat > demo.sts.yaml <<EOF
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: nginx-statefulset
+  name: nginx-statefulset    #pod名字可控。0后面增序
   namespace: default
   labels:
     app: nginx-sts
 spec:
   replicas: 3
-  serviceName: "nginx"
+  serviceName: "nginx"  # 指定服务名称 配和无头服务
   selector:
     matchLabels:
       app: nginx-sts
@@ -846,11 +935,13 @@ spec:
         image: nginx:alpine
         ports:
         - containerPort: 80
+EOF
 ```
 
 无头服务Headless Service
 
 ```yaml
+cat > headless.svc.yaml <<EOF
 kind: Service
 apiVersion: v1
 metadata:
@@ -864,14 +955,31 @@ spec:
     port: 80
     targetPort: 80
   clusterIP: None
+EOF
+
+[root@k8s-master efk]# kubectl create -f demo.sts.yaml
+statefulset.apps/nginx-statefulset created
+[root@k8s-master efk]# kubectl create -f headless.svc.yaml
+service/nginx created
+[root@k8s-master efk]# kubectl get po
+NAME                       READY   STATUS    RESTARTS   AGE
+nginx-statefulset-0        1/1     Running   0          28s
+nginx-statefulset-1        1/1     Running   0          26s
+nginx-statefulset-2        1/1     Running   0          24s
+[root@k8s-master efk]# kubectl get svc
+NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
+nginx        ClusterIP   None         <none>        80/TCP    2m37s
+
+[root@k8s-master efk]# kubectl exec nginx-statefulset-0 -- curl nginx-statefulset-1.nginx
+[root@k8s-master efk]# kubectl exec nginx-statefulset-0 -- curl nginx-statefulset-2.nginx
+
 $ kubectl -n default exec  -ti nginx-statefulset-0 sh
 / # curl nginx-statefulset-2.nginx
 ```
 
 ###### [部署并验证](http://49.7.203.222:3000/#/logging/deploy-efk?id=部署并验证)
-
 ```
-es-config.yaml
+cat > es-config.yaml <<\EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -884,7 +992,9 @@ data:
     network.host: 0.0.0.0
     discovery.seed_hosts: "es-svc-headless"
     cluster.initial_master_nodes: "elasticsearch-0,elasticsearch-1,elasticsearch-2"
-es-svc-headless.yaml
+EOF
+
+cat > es-svc-headless.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -900,7 +1010,9 @@ spec:
   - name: in
     port: 9300
     protocol: TCP
-es-statefulset.yaml
+EOF
+
+cat > es-statefulset.yaml <<EOF
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -910,7 +1022,7 @@ metadata:
     k8s-app: elasticsearch
 spec:
   replicas: 3
-  serviceName: es-svc-headless
+  serviceName: es-svc-headless  # 
   selector:
     matchLabels:
       k8s-app: elasticsearch
@@ -982,7 +1094,9 @@ spec:
       resources:
         requests:
           storage: 5Gi
-es-svc.yaml
+EOF
+
+cat > es-svc.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -997,29 +1111,48 @@ spec:
   - name: out
     port: 9200
     protocol: TCP
+EOF
+
 $ kubectl create namespace logging
 
 ## 部署服务
 $ kubectl apply -f es-config.yaml
 $ kubectl apply -f es-svc-headless.yaml
-$ kubectl apply -f es-sts.yaml
+# kubectl apply -f es-statefulset.yaml
 $ kubectl apply -f es-svc.yaml
+# kubectl apply -f es-statefulset.yaml
+
+
+Events:
+  Type     Reason            Age    From               Message
+  ----     ------            ----   ----               -------
+  Warning  FailedScheduling  6m36s  default-scheduler  0/3 nodes are available: 3 pod has unbound immediate PersistentVolumeClaims.
+  Warning  FailedScheduling  6m35s  default-scheduler  0/3 nodes are available: 1 Insufficient cpu, 3 Insufficient memory.
+  Warning  FailedScheduling  5m10s  default-scheduler  0/3 nodes are available: 1 Insufficient cpu, 3 Insufficient memory.
+#以上问题 解决。把虚拟机cpu调整4 内存8G 
 
 ## 等待片刻，查看一下es的pod部署到了k8s-slave1节点，状态变为running
-$ kubectl -n logging get po -o wide  
-NAME              READY   STATUS    RESTARTS   AGE   IP  
-elasticsearch-0   1/1     Running   0          15m   10.244.0.126 
-elasticsearch-1   1/1     Running   0          15m   10.244.0.127
-elasticsearch-2   1/1     Running   0          15m   10.244.0.128
+# kubectl -n logging get po -owide
+NAME              READY   STATUS    RESTARTS   AGE     IP            NODE         NOMINATED NODE   READINESS GATES
+elasticsearch-0   1/1     Running   1          9m57s   10.244.1.83   k8s-slave1   <none>           <none>
+elasticsearch-1   1/1     Running   1          9m54s   10.244.2.59   k8s-slave2   <none>           <none>
+elasticsearch-2   1/1     Running   0          9m50s   10.244.1.87   k8s-slave1   <none>           <none>
+[root@k8s-master efk]# kubectl -n logging get pvc
+NAME                             STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+es-data-volume-elasticsearch-0   Bound    pvc-74540af4-9f34-4c73-99a8-27615081a8ac   5Gi        RWO            nfs            9h
+es-data-volume-elasticsearch-1   Bound    pvc-f365d396-53fc-4018-875c-40b5edf8643c   5Gi        RWO            nfs            8h
+es-data-volume-elasticsearch-2   Bound    pvc-46561394-a81d-4f09-81ca-e0027eb92423   5Gi        RWO            nfs            28m
+
 # 然后通过curl命令访问一下服务，验证es是否部署成功
-$ kubectl -n logging get svc  
-es-svc            ClusterIP   10.104.226.175   <none>        9200/TCP   2s
-es-svc-headless   ClusterIP   None             <none>        9300/TCP   32m 
-$ curl 10.104.226.175:9200
+[root@k8s-master efk]# kubectl -n logging get svc
+NAME              TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+es-svc            ClusterIP   10.106.126.23   <none>        9200/TCP   9h
+es-svc-headless   ClusterIP   None            <none>        9300/TCP   9h
+[root@k8s-master efk]# curl 10.106.126.23:9200
 {
-  "name" : "elasticsearch-2",
+  "name" : "elasticsearch-1",
   "cluster_name" : "luffy-elasticsearch",
-  "cluster_uuid" : "7FDIACx9T-2ajYcB5qp4hQ",
+  "cluster_uuid" : "2D7ZzNpSRAGqg0YL6Q_vfg",
   "version" : {
     "number" : "7.4.2",
     "build_flavor" : "default",
@@ -1032,6 +1165,7 @@ $ curl 10.104.226.175:9200
     "minimum_index_compatibility_version" : "6.0.0-beta1"
   },
   "tagline" : "You Know, for Search"
+}
 ```
 
 ##### [部署kibana](http://49.7.203.222:3000/#/logging/deploy-efk?id=部署kibana)
@@ -1044,8 +1178,10 @@ $ curl 10.104.226.175:9200
 
 ###### [部署并验证](http://49.7.203.222:3000/#/logging/deploy-efk?id=部署并验证-1)
 
+文件夹efk里
+
 ```
-efk/kibana.yaml
+cat > kibana.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1131,14 +1267,34 @@ spec:
             name: kibana
             port:
               number: 5601
+EOF
+        
 $ kubectl apply -f kibana.yaml  
 deployment.apps/kibana created
 service/kibana created  
 ingress/kibana created
-
+[root@k8s-master efk]# kubectl -n logging get ing
+NAME     CLASS    HOSTS              ADDRESS   PORTS   AGE
+kibana   <none>   kibana.luffy.com             80      19s
 ## 配置域名解析 kibana.luffy.com，并访问服务进行验证，若可以访问，说明连接es成功
+# 宿主机
+vi /etc/hosts  # 增加的内容 kibana.luffy.com
+10.211.55.25 wordpress.luffy.com harbor.luffy.com kibana.luffy.com
+[root@k8s-master efk]# kubectl -n logging get ing
+NAME     CLASS    HOSTS              ADDRESS   PORTS   AGE
+kibana   <none>   kibana.luffy.com             80      19s
+[root@k8s-master efk]# kubectl -n logging get po
+NAME                      READY   STATUS    RESTARTS   AGE
+elasticsearch-0           1/1     Running   1          33m
+elasticsearch-1           1/1     Running   1          33m
+elasticsearch-2           1/1     Running   0          33m
+kibana-5f568b7b7c-rjwf5   1/1     Running   0          6m55s
+[root@k8s-master efk]# kubectl -n logging logs -f kibana-5f568b7b7c-rjwf5
+。。。。
+{"type":"log","@timestamp":"2022-10-24T08:40:30Z","tags":["info","http","server","Kibana"],"pid":7,"message":"http server running at http://0:5601"}
+{"type":"log","@timestamp":"2022-10-24T08:40:31Z","tags":["status","plugin:spaces@7.4.2","info"],"pid":7,"state":"green","message":"Status changed from yellow to green - Ready","prevState":"yellow","prevMsg":"Waiting for Elasticsearch"}
 
-
+#浏览器访问 kibana.luffy.com  找到dev tools 工具添加如下代码
 # GET /_cat/health?v
 # GET /_cat/indices
 ```
@@ -1153,8 +1309,8 @@ ingress/kibana created
 
 ###### [部署服务](http://49.7.203.222:3000/#/logging/deploy-efk?id=部署服务)
 
-```
-efk/fluentd-es-config-main.yaml
+```bash
+cat > fluentd-es-config-main.yaml <<EOF
 apiVersion: v1
 data:
   fluent.conf: |-
@@ -1172,6 +1328,7 @@ metadata:
     addonmanager.kubernetes.io/mode: Reconcile
   name: fluentd-es-config-main
   namespace: logging
+EOF
 ```
 
 配置文件，fluentd-config.yaml，注意点：
@@ -1181,7 +1338,7 @@ metadata:
 3. match输出到es端的flush配置
 
 ```
-efk/fluentd-configmap.yaml
+cat > fluentd-configmap.yaml <<\EOF
 kind: ConfigMap
 apiVersion: v1
 metadata:
@@ -1251,6 +1408,7 @@ data:
         overflow_action block
       </buffer>
     </match>
+EOF
 ```
 
 daemonset定义文件，fluentd.yaml，注意点：
@@ -1261,7 +1419,7 @@ daemonset定义文件，fluentd.yaml，注意点：
 4. 想要部署fluentd的节点，需要添加fluentd=true的标签
 
 ```
-efk/fluentd.yaml
+cat > fluentd.yaml <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -1360,27 +1518,29 @@ spec:
           defaultMode: 420
           name: fluentd-config
         name: config-volume
+EOF
+        
 ## 给slave1打上标签，进行部署fluentd日志采集服务
 $ kubectl label node k8s-slave1 fluentd=true  
 $ kubectl label node k8s-slave2 fluentd=true
+# kubectl label node k8s-master fluentd-  #删除标签
+# kubectl get no --show-labels 
 
 # 创建服务
 $ kubectl apply -f fluentd-es-config-main.yaml  
-configmap/fluentd-es-config-main created  
 $ kubectl apply -f fluentd-configmap.yaml  
-configmap/fluentd-config created  
 $ kubectl apply -f fluentd.yaml  
-serviceaccount/fluentd-es created  
-clusterrole.rbac.authorization.k8s.io/fluentd-es created  
-clusterrolebinding.rbac.authorization.k8s.io/fluentd-es created  
-daemonset.extensions/fluentd-es created 
+
 
 ## 然后查看一下pod是否已经在k8s-slave1
-$ kubectl -n logging get po -o wide
-NAME                      READY   STATUS    RESTARTS   AGE  
-elasticsearch-logging-0   1/1     Running   0          123m  
-fluentd-es-246pl             1/1     Running   0          2m2s  
-kibana-944c57766-ftlcw    1/1     Running   0          50m
+[root@k8s-master efk]# kubectl -n logging get po -owide
+NAME                      READY   STATUS    RESTARTS   AGE     IP            NODE         NOMINATED NODE   READINESS GATES
+elasticsearch-0           1/1     Running   0          53m     10.244.2.67   k8s-slave2   <none>           <none>
+elasticsearch-1           1/1     Running   1          4h41m   10.244.2.59   k8s-slave2   <none>           <none>
+elasticsearch-2           1/1     Running   0          53m     10.244.1.92   k8s-slave1   <none>           <none>
+fluentd-es-5bp6k          1/1     Running   0          8s      10.244.1.96   k8s-slave1   <none>           <none>
+fluentd-es-6r422          1/1     Running   0          8s      10.244.2.73   k8s-slave2   <none>           <none>
+kibana-5f568b7b7c-rjwf5   1/1     Running   0          4h14m   10.244.2.64   k8s-slave2   <none>           <none>      
 ```
 
 
