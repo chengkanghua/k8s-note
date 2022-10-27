@@ -69,8 +69,8 @@ $ docker run --name prometheus -d -p 127.0.0.1:9090:9090 prom/prometheus:v2.28.0
 我们想制作Prometheus的yaml文件，可以先启动容器进去看一下默认的启动命令：
 
 ```bash
-$ docker run -d --name tmp -p 9090:9090 prom/prometheus:v2.28.0
-$ docker exec -ti tmp sh
+# docker run -d --name tmp -p 9090:9090 prom/prometheus:v2.28.0
+$ docker exec -ti prometheus sh
 #/ ps aux
 #/ cat /etc/prometheus/prometheus.yml
 # my global config
@@ -107,8 +107,10 @@ scrape_configs:
 本例中，使用k8s来部署，所需的资源清单如下：
 
 ```bash
+[root@k8s-master ~]# mkdir prometheus
+[root@k8s-master ~]# cd prometheus
 # 需要准备配置文件，因此使用configmap的形式保存
-$ cat prometheus.yml
+cat > prometheus.yml <<\EOF
 # my global config
 global:
   scrape_interval: 30s
@@ -133,12 +135,14 @@ scrape_configs:
   - job_name: 'prometheus'
     static_configs:
     - targets: ['localhost:9090']
-    
+EOF
+
+# kubectl create ns monitor
 # kubectl -n monitor create configmap prometheus-config --from-file=prometheus.yml
 
 
 # pvc
-$ cat pvc.yaml
+cat > pvc.yaml <<EOF
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
@@ -151,11 +155,12 @@ spec:
   resources:
     requests:
       storage: 200Gi
+EOF
 
-
+# kubectl create -f pvc.yaml
 # prometheus的资源文件
 # 出现Prometheus数据存储权限问题，因为Prometheus内部使用nobody启动进程，挂载数据目录后权限为root，因此使用initContainer进行目录权限修复：
-$ cat prometheus-deployment.yaml
+cat > prometheus-deployment.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -216,9 +221,10 @@ spec:
       - configMap:
           name: prometheus-config
         name: config-volume
-        
+EOF
+
 # rbac,prometheus会调用k8s api做服务发现进行抓取指标
-$ cat prometheus-rbac.yaml
+cat > prometheus-rbac.yaml <<EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -274,10 +280,10 @@ subjects:
 - kind: ServiceAccount
   name: prometheus
   namespace: monitor
-
+EOF
 
 # 提供Service，为Ingress使用
-$ cat prometheus-svc.yaml
+cat > prometheus-svc.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -293,8 +299,9 @@ spec:
     - name: web
       port: 9090
       targetPort: http
+EOF
 
-$ cat prometheus-ingress.yaml
+cat > prometheus-ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -312,6 +319,7 @@ spec:
             name: prometheus
             port:
               number: 9090
+EOF
 ```
 
 部署上述资源：
@@ -323,11 +331,30 @@ $ kubectl create namespace monitor
 # 配置文件
 $ kubectl -n monitor create configmap prometheus-config --from-file=prometheus.yml
 
+[root@k8s-master prometheus]# ll
+总用量 24
+-rw-r--r--. 1 root root 1676 10月 25 09:15 prometheus-deployment.yaml
+-rw-r--r--. 1 root root  318 10月 25 09:23 prometheus-ingress.yaml
+-rw-r--r--. 1 root root  806 10月 25 09:22 prometheus-rbac.yaml
+-rw-r--r--. 1 root root  230 10月 25 09:22 prometheus-svc.yaml
+-rw-r--r--. 1 root root  607 10月 25 08:11 prometheus.yml
+-rw-r--r--. 1 root root  205 10月 25 08:30 pvc.yaml
 #部署configmap
 $ kubectl apply -f .
 
 # 访问测试
 $ kubectl -n monitor get ingress
+
+[root@k8s-master prometheus]# kubectl -n monitor get ingress
+NAME         CLASS    HOSTS                  ADDRESS   PORTS   AGE
+prometheus   <none>   prometheus.luffy.com             80      3m21s
+[root@k8s-master prometheus]# kubectl -n monitor get po
+NAME                          READY   STATUS    RESTARTS   AGE
+prometheus-7d6799c84c-tg774   1/1     Running   0          3m24s
+
+# 宿主机配置hosts
+vi /etc/hosts
+10.211.55.25 wordpress.luffy.com harbor.luffy.com kibana.luffy.com prometheus.luffy.com
 ```
 
 
@@ -411,32 +438,46 @@ Prometheus：定期去Tragets列表拉取监控数据，存储到TSDB中，并�
 CoreDNS：
 
 ```bash
-$ kubectl -n kube-system get po -owide|grep coredns
-coredns-58cc8c89f4-nshx2             1/1     Running   6          22d   10.244.0.20  
-coredns-58cc8c89f4-t9h2r             1/1     Running   7          22d   10.244.0.21
+[root@k8s-master prometheus]# kubectl -n kube-system get po -owide|grep coredns
+coredns-59d64cd4d4-kpl7s             1/1     Running   12         14d     10.244.0.55    k8s-master       
+coredns-59d64cd4d4-lb7tv             1/1     Running   12         14d     10.244.0.56    k8s-master           
+[root@k8s-master prometheus]# kubectl -n kube-system get svc
+NAME             TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)                  AGE
+kube-dns         ClusterIP   10.96.0.10     <none>        53/UDP,53/TCP,9153/TCP   14d
+metrics-server   ClusterIP   10.97.60.134   <none>        443/TCP                  5d23h
 
-$ curl 10.244.0.20:9153/metrics
+$ curl 10.244.0.55:9153/metrics
 ```
 
 修改target配置：
 
 ```bash
+# kubectl -n monitor get cm
+NAME                DATA   AGE
+kube-root-ca.crt    1      134m
+prometheus-config   1      133m
 $ kubectl -n monitor edit configmap prometheus-config
 ...
     scrape_configs:
       - job_name: 'prometheus'
         static_configs:
         - targets: ['localhost:9090']
-      - job_name: 'coredns'
+      - job_name: 'coredns'  # 这块是添加的内容
         static_configs:
-        - targets: ['10.96.0.10:9153']
-      
-$ kubectl apply -f prometheus-configmap.yaml
+        - targets: ['10.244.0.55:9153']
+        
+# 检查容器里配置是否修改    
+# kubectl -n monitor exec prometheus-7d6799c84c-tg774 -- cat /etc/prometheus/prometheus.yml
 
 # 等待30s左右，重启Prometheus进程
-$ kubectl -n monitor get po -owide
-prometheus-5cd4d47557-758r5   1/1     Running   0          12m   10.244.2.104
-$ curl -XPOST 10.244.2.104:9090/-/reload
+# kubectl -n monitor get po -owide
+NAME                          READY   STATUS    RESTARTS   AGE   IP            NODE        
+prometheus-7d6799c84c-tg774   1/1     Running   0          71m   10.244.1.99   k8s-slave1   
+[root@k8s-master prometheus]# curl -XPOST 10.244.1.99:9090/-/reload  #软重启prometheus
+
+[root@k8s-master prometheus]# kubectl -n monitor logs prometheus-7d6799c84c-tg774 #通过日志查看到重新加载了配置文件
+level=info ts=2022-10-25T01:26:07.924Z caller=main.go:995 msg="Completed loading of configuration file" filename=/etc/prometheus/prometheus.yml totalDuration=681.616µs remote_storage=8.15µs web_handler=672ns query_engine=1.061µs scrape=304.223µs scrape_sd=41.035µs notify=27.57µs notify_sd=13.206µs rules=3.685µs
+
 ```
 
 
@@ -462,8 +503,36 @@ $ kubectl get svc
 NAME         TYPE        CLUSTER-IP   EXTERNAL-IP   PORT(S)   AGE
 kubernetes   ClusterIP   10.96.0.1    <none>        443/TCP   23d
 
-$ kubectl -n monitor describe secret prometheus-token-pkzfx
-$ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6InhXcmtaSG5ZODF1TVJ6dUcycnRLT2c4U3ZncVdoVjlLaVRxNG1wZ0pqVmcifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlcm5ldGVzLWRhc2hib2FyZCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi1xNXBueiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6ImViZDg2ODZjLWZkYzAtNDRlZC04NmZlLTY5ZmE0ZTE1YjBmMCIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlcm5ldGVzLWRhc2hib2FyZDphZG1pbiJ9.iEIVMWg2mHPD88GQ2i4uc_60K4o17e39tN0VI_Q_s3TrRS8hmpi0pkEaN88igEKZm95Qf1qcN9J5W5eqOmcK2SN83Dd9dyGAGxuNAdEwi0i73weFHHsjDqokl9_4RGbHT5lRY46BbIGADIphcTeVbCggI6T_V9zBbtl8dcmsd-lD_6c6uC2INtPyIfz1FplynkjEVLapp_45aXZ9IMy76ljNSA8Uc061Uys6PD3IXsUD5JJfdm7lAt0F7rn9SdX1q10F2lIHYCMcCcfEpLr4Vkymxb4IU4RCR8BsMOPIO_yfRVeYZkG4gU2C47KwxpLsJRrTUcUXJktSEPdeYYXf9w" https://10.96.0.1:6443/metrics
+$ kubectl -n monitor describe secret prometheus-token-pkzfx  #获取token
+eyJhbGciOiJSUzI1NiIsImtpZCI6Ik9VMi1HX3FFMlBUT193OUo3ZWI4eDh3aE9pc0dTYXMyQWRMNnRHNHJtMWsifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJtb25pdG9yIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6InByb21ldGhldXMtdG9rZW4tZzI1d2YiLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoicHJvbWV0aGV1cyIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjNiZmIxYjI0LWU1MzctNDI0ZS05MGQ3LTQyMTM2MTcyZTBkYiIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDptb25pdG9yOnByb21ldGhldXMifQ.Yq5onkrUCRkUbF5NuMsjVmXo4DOC3tDHsTCcucaEITeAI3T67g-WWnnEPntCZgKA8-_0pAQUB0oyVWCOTzpOeHsVsLk0sU2Sdik6hvTARu__Ljwra1NRfEf8S_PJDFKsb6iYWCnMj4ximepWX2zpn5rPJqR2VZ-cDgxNrKMOUODgh1_r_zr7Zi9RXyGp7g4jVnxnfe4RXCCylq2WVeX0C5w5kpw2vfIq9HOWhip94sm00iffv7YOn4ACGXfQ0SLZRJyUMv7wXmksliFe85KTHMerqMBdaOf6dE3ylYoqMnQuKSQ5gCnLOWMcX2XjSZ7li1lPNvQntPePCGPG7mdImA
+-----第二种获取token方法
+# kubectl -n monitor get po
+# kubectl -n monitor exec -ti prometheus-7d6799c84c-tg774 -- /bin/sh
+Defaulted container "prometheus" out of: prometheus, change-permission-of-directory (init)
+/prometheus $ df -h |grep service
+tmpfs                     2.1G     12.0K      2.1G   0% /var/run/secrets/kubernetes.io/serviceaccount
+/prometheus $ cat /var/run/secrets/kubernetes.io/serviceaccount/token
+eyJhbGciOiJSUzI1NiIsImtpZCI6Ik9VMi1HX3FFMlBUT193OUo3ZWI4eDh3aE9pc0dTYXMyQWRMNnRHNHJtMWsifQ.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWwiXSwiZXhwIjoxNjk4MjAyOTMyLCJpYXQiOjE2NjY2NjY5MzIsImlzcyI6Imh0dHBzOi8va3ViZXJuZXRlcy5kZWZhdWx0LnN2Yy5jbHVzdGVyLmxvY2FsIiwia3ViZXJuZXRlcy5pbyI6eyJuYW1lc3BhY2UiOiJtb25pdG9yIiwicG9kIjp7Im5hbWUiOiJwcm9tZXRoZXVzLTdkNjc5OWM4NGMtdGc3NzQiLCJ1aWQiOiI2ODg5ZTY1OC1kNjRiLTQwZjctYjVkNi1hNjc2YWMxNmVmNTgifSwic2VydmljZWFjY291bnQiOnsibmFtZSI6InByb21ldGhldXMiLCJ1aWQiOiIzYmZiMWIyNC1lNTM3LTQyNGUtOTBkNy00MjEzNjE3MmUwZGIifSwid2FybmFmdGVyIjoxNjY2NjcwNTM5fSwibmJmIjoxNjY2NjY2OTMyLCJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6bW9uaXRvcjpwcm9tZXRoZXVzIn0.Jh_l5odIF72yamDKO9nDQoTxX6QRSZkpLchNxIa7dA53FZgog-jSCToitSN2qJcB5-24q-JQ9F8ZezwhPU5IAbUVz9i2NalcFpooCIrjRaYaqpS8IOk3I9SvPIcwyQQn6iJryvFzRhaj9t5h0eC1UxHpvpX8ziQgrlEmCh_FBX1IMZ85hed3Is8sBdaZLVrImUcuIdL5aEW9fbnOQKOP3TgNQ-Y__K-inf9sfAypU7bciti-L6axbWAgXtX40CfB5WV1ApyBLopMVDl06UypN8JD3yRQPfsf-CZ49K7a_5f8H8MDGgW8Z4Vcbw0u9gJ7xYFLMpOnEaVPadndTL4T4A
+$ curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6Ik9VMi1HX3FFMlBUT193OUo3ZWI4eDh3aE9pc0dTYXMyQWRMNnRHNHJtMWsifQ.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWwiXSwiZXhwIjoxNjk4MjAyOTMyLCJpYXQiOjE2NjY2NjY5MzIsImlzcyI6Imh0dHBzOi8va3ViZXJuZXRlcy5kZWZhdWx0LnN2Yy5jbHVzdGVyLmxvY2FsIiwia3ViZXJuZXRlcy5pbyI6eyJuYW1lc3BhY2UiOiJtb25pdG9yIiwicG9kIjp7Im5hbWUiOiJwcm9tZXRoZXVzLTdkNjc5OWM4NGMtdGc3NzQiLCJ1aWQiOiI2ODg5ZTY1OC1kNjRiLTQwZjctYjVkNi1hNjc2YWMxNmVmNTgifSwic2VydmljZWFjY291bnQiOnsibmFtZSI6InByb21ldGhldXMiLCJ1aWQiOiIzYmZiMWIyNC1lNTM3LTQyNGUtOTBkNy00MjEzNjE3MmUwZGIifSwid2FybmFmdGVyIjoxNjY2NjcwNTM5fSwibmJmIjoxNjY2NjY2OTMyLCJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6bW9uaXRvcjpwcm9tZXRoZXVzIn0.Jh_l5odIF72yamDKO9nDQoTxX6QRSZkpLchNxIa7dA53FZgog-jSCToitSN2qJcB5-24q-JQ9F8ZezwhPU5IAbUVz9i2NalcFpooCIrjRaYaqpS8IOk3I9SvPIcwyQQn6iJryvFzRhaj9t5h0eC1UxHpvpX8ziQgrlEmCh_FBX1IMZ85hed3Is8sBdaZLVrImUcuIdL5aEW9fbnOQKOP3TgNQ-Y__K-inf9sfAypU7bciti-L6axbWAgXtX40CfB5WV1ApyBLopMVDl06UypN8JD3yRQPfsf-CZ49K7a_5f8H8MDGgW8Z4Vcbw0u9gJ7xYFLMpOnEaVPadndTL4T4A" https://10.96.0.1:6443/metrics  #拒接链接 端口给成443可以
+
+[root@k8s-master prometheus]# kubectl describe svc kubernetes
+Name:              kubernetes
+Namespace:         default
+Labels:            component=apiserver
+                   provider=kubernetes
+Annotations:       <none>
+Selector:          <none>
+Type:              ClusterIP
+IP Family Policy:  SingleStack
+IP Families:       IPv4
+IP:                10.96.0.1
+IPs:               10.96.0.1
+Port:              https  443/TCP
+TargetPort:        6443/TCP
+Endpoints:         10.211.55.25:6443
+Session Affinity:  None
+Events:            <none>
+curl -k  -H "Authorization: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6Ik9VMi1HX3FFMlBUT193OUo3ZWI4eDh3aE9pc0dTYXMyQWRMNnRHNHJtMWsifQ.eyJhdWQiOlsiaHR0cHM6Ly9rdWJlcm5ldGVzLmRlZmF1bHQuc3ZjLmNsdXN0ZXIubG9jYWwiXSwiZXhwIjoxNjk4MjAyOTMyLCJpYXQiOjE2NjY2NjY5MzIsImlzcyI6Imh0dHBzOi8va3ViZXJuZXRlcy5kZWZhdWx0LnN2Yy5jbHVzdGVyLmxvY2FsIiwia3ViZXJuZXRlcy5pbyI6eyJuYW1lc3BhY2UiOiJtb25pdG9yIiwicG9kIjp7Im5hbWUiOiJwcm9tZXRoZXVzLTdkNjc5OWM4NGMtdGc3NzQiLCJ1aWQiOiI2ODg5ZTY1OC1kNjRiLTQwZjctYjVkNi1hNjc2YWMxNmVmNTgifSwic2VydmljZWFjY291bnQiOnsibmFtZSI6InByb21ldGhldXMiLCJ1aWQiOiIzYmZiMWIyNC1lNTM3LTQyNGUtOTBkNy00MjEzNjE3MmUwZGIifSwid2FybmFmdGVyIjoxNjY2NjcwNTM5fSwibmJmIjoxNjY2NjY2OTMyLCJzdWIiOiJzeXN0ZW06c2VydmljZWFjY291bnQ6bW9uaXRvcjpwcm9tZXRoZXVzIn0.Jh_l5odIF72yamDKO9nDQoTxX6QRSZkpLchNxIa7dA53FZgog-jSCToitSN2qJcB5-24q-JQ9F8ZezwhPU5IAbUVz9i2NalcFpooCIrjRaYaqpS8IOk3I9SvPIcwyQQn6iJryvFzRhaj9t5h0eC1UxHpvpX8ziQgrlEmCh_FBX1IMZ85hed3Is8sBdaZLVrImUcuIdL5aEW9fbnOQKOP3TgNQ-Y__K-inf9sfAypU7bciti-L6axbWAgXtX40CfB5WV1ApyBLopMVDl06UypN8JD3yRQPfsf-CZ49K7a_5f8H8MDGgW8Z4Vcbw0u9gJ7xYFLMpOnEaVPadndTL4T4A" https://10.211.55.25:6443/metrics 
 ```
 
 可以通过手动配置如下job来试下对apiserver服务的监控，
@@ -479,6 +548,11 @@ $ kubectl -n monitor edit configmap prometheus-config
           ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
           insecure_skip_verify: true
         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        
+
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-tg774 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.1.99:9090/-/reload  #软重启prometheus
 ```
 
 
@@ -496,7 +570,7 @@ node_exporter https://github.com/prometheus/node_exporter
 - 挂载宿主机中的系统文件信息
 
 ```bash
-$ cat node-exporter.ds.yaml
+cat > node-exporter.ds.yaml <<\EOF
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -569,6 +643,7 @@ spec:
       - name: root
         hostPath:
           path: /
+EOF
 ```
 
 创建node-exporter服务
@@ -576,11 +651,14 @@ spec:
 ```bash
 $ kubectl apply -f node-exporter.ds.yaml
 
-$ kubectl -n monitor get po -owide
-node-exporter-djcqx           1/1     Running   0          110s   172.21.51.68
+[root@k8s-master ~]# kubectl -n monitor get po -owide
+NAME                          READY   STATUS    RESTARTS   AGE     IP             NODE      
+node-exporter-mvclp           1/1     Running   0          14m     10.211.55.27   k8s-slave2   
+node-exporter-q8l76           1/1     Running   0          14m     10.211.55.25   k8s-master   
+node-exporter-zzshw           1/1     Running   0          14m     10.211.55.26   k8s-slave1   
+prometheus-7d6799c84c-tg774   1/1     Running   0          6h57m   10.244.1.99    k8s-slave1  
 
-
-$ curl 172.21.51.143:9100/metrics
+$ curl 10.211.55.26:9100/metrics
 ```
 
 问题来了，如何添加到Prometheus的target中？
@@ -602,9 +680,15 @@ $ curl 172.21.51.143:9100/metrics
 配置job即可：
 
 ```bash
+# kubectl -n monitor edit cm prometheus-config
+.... 下面增加内容
       - job_name: 'kubernetes-sd-node-exporter'
         kubernetes_sd_configs:
           - role: node
+          
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-tg774 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.1.99:9090/-/reload  #软重启prometheus
 ```
 
 重新reload后查看效果：
@@ -630,6 +714,9 @@ instance的值其实则取自于`__address__`
 因此，利用relabeling的能力，只需要将`__address__`替换成node_exporter的服务地址即可。
 
 ```bash
+# kubectl -n monitor edit cm prometheus-config
+.... 下面增加内容
+
       - job_name: 'kubernetes-sd-node-exporter'
         kubernetes_sd_configs:
           - role: node
@@ -639,13 +726,17 @@ instance的值其实则取自于`__address__`
           replacement: '${1}:9100'
           target_label: __address__
           action: replace
+          
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-tg774 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.1.99:9090/-/reload  #软重启prometheus
 ```
 
 再次更新Prometheus服务后，查看targets列表及node-exporter提供的指标，node_load1
 
 
 
-# [容器指标采集](http://49.7.203.222:3000/#/prometheus/targets/cadvisor)
+## [容器指标采集](http://49.7.203.222:3000/#/prometheus/targets/cadvisor)
 
 ###### [使用cadvisor实现容器指标的采集（新）](http://49.7.203.222:3000/#/prometheus/targets/cadvisor?id=使用cadvisor实现容器指标的采集（新）)
 
@@ -693,6 +784,10 @@ http://172.21.51.68:10250/metrics
 针对`__schema__`：
 
 ```yaml
+# kubectl -n monitor edit cm prometheus-config
+.... 下面增加内容
+
+
       - job_name: 'kubernetes-sd-cadvisor'
         kubernetes_sd_configs:
           - role: node
@@ -704,6 +799,10 @@ http://172.21.51.68:10250/metrics
         relabel_configs:
         - target_label: __metrics_path__
           replacement: /metrics/cadvisor
+          
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-tg774 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.1.99:9090/-/reload  #软重启prometheus          
 ```
 
 重新应用配置，然后重建Prometheus的pod。查看targets列表，查看cadvisor指标，比如container_cpu_system_seconds_total，container_memory_usage_bytes
@@ -715,6 +814,9 @@ http://172.21.51.68:10250/metrics
 若想采集kubelet的指标：
 
 ```yaml
+# kubectl -n monitor edit cm prometheus-config
+.... 下面增加内容
+
       - job_name: 'kubernetes-sd-kubelet'
         kubernetes_sd_configs:
           - role: node
@@ -723,11 +825,15 @@ http://172.21.51.68:10250/metrics
           ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
           insecure_skip_verify: true
         bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-tg774 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.1.99:9090/-/reload  #软重启prometheus          
 ```
 
 
 
-# [K8s Service服务监控指标采集](http://49.7.203.222:3000/#/prometheus/targets/k8s-service)
+## [K8s Service服务监控指标采集](http://49.7.203.222:3000/#/prometheus/targets/k8s-service)
 
 ###### [集群Service服务的监控指标采集](http://49.7.203.222:3000/#/prometheus/targets/k8s-service?id=集群service服务的监控指标采集)
 
@@ -739,6 +845,27 @@ http://172.21.51.68:10250/metrics
       - job_name: 'kubernetes-sd-endpoints'
         kubernetes_sd_configs:
           - role: endpoints
+          
+# kubectl -n monitor edit cm prometheus-config  
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.0.75:9090/-/reload 
+
+[root@k8s-master ~]# kubectl get ep -A #并不是所有endpoint都实现了metrics接口
+NAMESPACE              NAME                        ENDPOINTS                                                  AGE
+default                kubernetes                  10.211.55.25:6443                                          15d
+default                nginx                       <none>                                                     43h
+kube-system            kube-dns                    10.244.0.74:53,10.244.0.76:53,10.244.0.74:53 + 3 more...   15d
+kube-system            metrics-server              10.244.0.80:4443                                           6d11h
+kubernetes-dashboard   dashboard-metrics-scraper   <none>                                                     7d5h
+kubernetes-dashboard   kubernetes-dashboard        <none>                                                     7d5h
+logging                es-svc                      <none>                                                     39h
+logging                es-svc-headless             <none>                                                     39h
+logging                kibana                      10.244.0.82:5601                                           29h
+luffy                  myblog                      <none>                                                     6d4h
+luffy                  mysql                       <none>                                                     6d4h
+monitor                prometheus                  10.244.0.75:9090                                           12h
+nfs-provisioner        luffy.com-nfs               <none>                                                     4d19h
 ```
 
 reload prometheush，此使的Target列表中，`kubernetes-sd-endpoints`下出现了N多条数据，
@@ -758,13 +885,18 @@ $ kubectl get endpoints --all-namespaces
 我们知道，relabel的作用对象是target的Before Relabling标签，比如说，假如通过如下定义:
 
 ```bash
-- job_name: 'kubernetes-sd-endpoints'
-  kubernetes_sd_configs:
-  - role: endpoints
-  relabel_configs:
-  - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
-    action: keep
-    regex: true
+      - job_name: 'kubernetes-sd-endpoints'
+        kubernetes_sd_configs:
+        	- role: endpoints
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+          
+# kubectl -n monitor edit cm prometheus-config  
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.0.75:9090/-/reload          
 ```
 
 那么就可以实现target的Before Relabling中若存在`__meta_kubernetes_service_annotation_prometheus_io_scrape`，且值为`true`的话，则会加入到kubernetes-sd-endpoints这个target中，否则就会被删除。
@@ -814,6 +946,11 @@ metadata:
   - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
     action: keep
     regex: true
+    
+# kubectl -n monitor edit cm prometheus-config  
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.0.75:9090/-/reload  
 ```
 
 这样的话，我们只需要为服务定义上如下的声明，即可实现Prometheus自动采集数据
@@ -830,7 +967,9 @@ metadata:
 ```bash
   annotations:
     prometheus.io/scrape: "true"
-    prometheus.io/path: "/path/to/metrics"
+    prometheus.io/path: "/path/to/metrics" #增加内容
+
+# kubectl edit svc details
 ```
 
 这样，Prometheus端会自动生成如下标签：
@@ -842,17 +981,22 @@ __meta_kubernetes_service_annotation_prometheus_io_path="/path/to/metrics"
 我们只需要在relabel_configs中用该标签的值，去重写`__metrics_path__`的值即可。因此：
 
 ```bash
-- job_name: 'kubernetes-sd-endpoints'
-  kubernetes_sd_configs:
-  - role: endpoints
-  relabel_configs:
-  - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
-    action: keep
-    regex: true
-  - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
-    action: replace
-    target_label: __metrics_path__
-    regex: (.+)
+      - job_name: 'kubernetes-sd-endpoints'
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+    
+# kubectl -n monitor edit cm prometheus-config  
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.0.75:9090/-/reload  
 ```
 
 有些时候，业务服务的metrics是独立的端口，比如coredns，业务端口是53，监控指标采集端口是9153，这种情况，如何处理？
@@ -883,11 +1027,26 @@ __address__="10.244.0.21"
 因此，需要使用正则规则取出上述两部分：
 
 ```bash
-  - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
-    action: replace
-    target_label: __address__
-    regex: ([^:]+)(?::\d+)?;(\d+)
-    replacement: $1:$2
+        - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+          action: replace
+          target_label: __address__
+          regex: ([^:]+)(?::\d+)?;(\d+)
+          replacement: $1:$2
+    
+# kubectl -n monitor edit cm prometheus-config  
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.0.75:9090/-/reload  
+
+
+# kubectl -n monitor edit cm prometheus-config   # 删除掉coredns
+      - job_name: 'coredns'
+        static_configs:
+        - targets: ['10.244.0.55:9153']
+        
+# 查看修改的配置是否更新上去
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml
+# curl -XPOST 10.244.0.75:9090/-/reload     
 ```
 
 需要注意的几点：
@@ -946,7 +1105,7 @@ __address__="10.244.0.21"
 
 
 
-# [kube-state-metrics监控](http://49.7.203.222:3000/#/prometheus/targets/kube-state-metrics)
+## [kube-state-metrics监控](http://49.7.203.222:3000/#/prometheus/targets/kube-state-metrics)
 
 ###### [kube-state-metrics监控](http://49.7.203.222:3000/#/prometheus/targets/kube-state-metrics?id=kube-state-metrics监控)
 
@@ -994,7 +1153,7 @@ __address__="10.244.0.21"
 ```bash
 $ wget https://github.com/kubernetes/kube-state-metrics/archive/v2.1.0.tar.gz
 
-$ tar zxf kube-state-metrics-2.1.0.tar.gz
+$ tar zxf v2.1.0.tar.gz
 $  cp -r kube-state-metrics-2.1.0/examples/standard/ .
 
 $ ll standard/
@@ -1017,6 +1176,14 @@ clusterrole.rbac.authorization.k8s.io/kube-state-metrics created
 deployment.apps/kube-state-metrics created
 serviceaccount/kube-state-metrics created
 service/kube-state-metrics created
+
+# kubectl -n monitor get po
+# kubectl -n monitor get svc
+# kubectl -n monitor get ep
+NAME                 ENDPOINTS                             AGE
+kube-state-metrics   10.244.1.113:8081,10.244.1.113:8080   2m14s
+prometheus           10.244.0.75:9090                      14h
+#  curl 10.244.1.113:8080/metrics
 ```
 
 如何添加到Prometheus监控target中？
@@ -1027,8 +1194,8 @@ apiVersion: v1
 kind: Service
 metadata:
   annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "8080"
+    prometheus.io/scrape: "true"  #添加
+    prometheus.io/port: "8080"    #添加
   labels:
     app.kubernetes.io/name: kube-state-metrics
     app.kubernetes.io/version: 2.1.0
@@ -1047,6 +1214,9 @@ spec:
     app.kubernetes.io/name: kube-state-metrics
     
 $ kubectl apply -f standard/service.yaml
+
+# 或者直接在线编辑
+# kubectl -n monitor edit svc kube-state-metrics
 ```
 
 查看target列表，观察是否存在kube-state-metrics的target。
@@ -1078,7 +1248,7 @@ kube_deployment_status_replicas_unavailable
 - 配置ingress暴露访问入口
 
 ```bash
-$ cat grafana-all.yaml
+cat > grafana-all.yaml <<EOF
 kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
@@ -1184,11 +1354,32 @@ spec:
             name: grafana
             port:
               number: 3000
+EOF
+
+[root@k8s-master prometheus]# kubectl apply -f grafana-all.yaml
+[root@k8s-master prometheus]# kubectl -n monitor get ing
+NAME         CLASS    HOSTS                  ADDRESS   PORTS   AGE
+grafana      <none>   grafana.luffy.com                80      30s
+prometheus   <none>   prometheus.luffy.com             80      22h
+[root@k8s-master prometheus]# kubectl -n monitor get po
+# 宿主机配置hosts
+$ sudo vi /etc/hosts
+10.211.55.25 wordpress.luffy.com harbor.luffy.com kibana.luffy.com prometheus.luffy.com grafana.luffy.com
 ```
 
 配置数据源：
 
 - URL：[http://prometheus:9090](http://prometheus:9090/)
+
+```bash
+[root@k8s-master prometheus]# kubectl -n monitor get svc
+NAME                 TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)             AGE
+grafana              ClusterIP   10.98.138.48   <none>        3000/TCP            5m53s
+kube-state-metrics   ClusterIP   None           <none>        8080/TCP,8081/TCP   8h
+prometheus           ClusterIP   10.96.235.6    <none>        9090/TCP            22h
+```
+
+
 
 如何丰富Grafana监控面板：
 
@@ -1221,7 +1412,7 @@ Kubernetes相关的插件：
 
 ```bash
 # 进入grafana容器内部执行安装
-$ kubectl -n monitor exec -ti grafana-594f447d6c-jmjsw bash
+$ kubectl -n monitor exec -ti grafana-594f447d6c-jmjsw -- bash
 bash-5.0# grafana-cli plugins install devopsprodigy-kubegraf-app 1.5.2
 installing devopsprodigy-kubegraf-app @ 1.5.2
 from: https://grafana.com/api/plugins/devopsprodigy-kubegraf-app/versions/1.5.2/download
@@ -1235,6 +1426,8 @@ Restart grafana after installing plugins . <service grafana-server restart>
 
 # 重建pod生效
 $ kubectl -n monitor delete po grafana-594f447d6c-jmjsw
+
+# kubectl -n monitor get po
 ```
 
 登录grafana界面，Configuration -> Plugins 中找到安装的插件，点击插件进入插件详情页面，点击 [Enable]按钮启用插件，点击 `Set up your first k8s-cluster` 创建一个新的 Kubernetes 集群:
@@ -1247,6 +1440,99 @@ $ kubectl -n monitor delete po grafana-594f447d6c-jmjsw
   - CA Cert：使用config文件中的`certificate-authority-data`对应的内容
   - Client Cert：使用config文件中的`client-certificate-data`对应的内容
   - Client Key：使用config文件中的`client-key-data`对应的内容
+  
+  ```bash
+  [root@k8s-master prometheus]# cat ~/.kube/config
+  apiVersion: v1
+  clusters:
+  - cluster:
+      certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJeU1UQXhNREF6TURjek0xb1hEVE15TVRBd056QXpNRGN6TTFvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTFI5CldQazUvRFYyZTJZWEx0NUcySW03ajNoSGRrSndiTUVqRFFLd1FyMXZNVUc0WWw4dmQxMk9odjIvYkRHUlh6T0sKRTR6ZEhRVEZKV1dLRTNhSHJYcGpUSnBuOWNBc2YxN2VFcy9RWHczVk03bmllZzIxY204bjc4akRUaTdaQUI0ZApmTWRYNmJscWx3U05LOGc0RUV5L1BFZjhjdzhOY25oTjZGSkJzc3p6MTMzVkFFM0w5QWVuUlppUklFNDNnaEhaCkJQRFY4aEpkQ3cyMDlTaHBranNvRXM1YWJyL3JQV1F6OVgvdzRlNGgyU1FXb2xXUERQckdIeStqeDloa2RkMDQKa1EvYnZaOEdFZDl3aWhaYXNvelA0VmNOYk5UR0ZQbmpNUjM0dkE0U3BTQ2U1VFZWZkQ0ZitFRW9IM3NET25vbgpldGM3NldsSUpkMkY3Q2Q3ZWpFQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZJSGlTWFZDNXRXRmJZWUwxdm1ya3VjMlJseVNNQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCL2NZMVFtd3ZZN09EeDQ1WVcveExTRWlmcTRvc08xTFF6bXdJcFBodW5FWEFoa3NWcAp3bkdCL3JTdjhjNzVwOVhmUG1pWTNNaXJpNENIU1lRSnBXWGY0YUZ1ZDJ0MnNvVmdkTkNGeE50QlNzU1NBY1JmCk5LdkJLZzZtS1YxUUEvaG5HbklMU1Rhd2YxdGdrVERMNmEwQTkzSk1NMENZNWRwK084RnhDOEN3RFlWelRCQXoKa3RIS3p1RU9QbCszWGhSSFJldGJjUHM1L2pPbVBicmZHK1JReWhtSmJhZE5BRGV2QVBFZnNhajFQVTNWTU1DVQpVWFlDc2JMU1ZaSEhRT2Yyd202L0JBWS93Zkdaclo1OXpVUndUZnFJSTd4Q2R3Qnc4ZG5CL24rcDhtQUs3SnFUCkZwYWZPdUgralRxQnlJR0VSWUFPRzhwVS9NQkpHckphRjM2ZQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+      server: https://10.211.55.25:6443
+    name: kubernetes
+  contexts:
+  - context:
+      cluster: kubernetes
+      user: kubernetes-admin
+    name: kubernetes-admin@kubernetes
+  current-context: kubernetes-admin@kubernetes
+  kind: Config
+  preferences: {}
+  users:
+  - name: kubernetes-admin
+    user:
+      client-certificate-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM4ekNDQWR1Z0F3SUJBZ0lKQUp5dWdZbEdzTXMwTUEwR0NTcUdTSWIzRFFFQkN3VUFNQlV4RXpBUkJnTlYKQkFNVENtdDFZbVZ5Ym1WMFpYTXdIaGNOTWpJeE1ERXdNRFV4TlRJMVdoY05Nekl4TURBM01EVXhOVEkxV2pBMApNUmN3RlFZRFZRUUtEQTV6ZVhOMFpXMDZiV0Z6ZEdWeWN6RVpNQmNHQTFVRUF3d1FhM1ZpWlhKdVpYUmxjeTFoClpHMXBiakNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFNaVJyaWhJMUk0L0xkWWQKVkRBQkFqUkpEa3lPR3dRT2NVblRsNUVJS29nZ09rZGZ2azRrTkJlUWlLNmd4cUlUY3M0SEQ3ZmhqSW9tUkU1Ugpyd00wa2lQVmhJb2VvVVl2dXE0eEJxY2ZGenRtU0E4Ni9aSEk5Q2FaOW93RnNNZmpXRDZ0QlRlUUwwdDVWWG13ClBmemxkbFI1VmVBV3lzZVV4blNtOU1oYkJJY2pjc0lwbnpuQzM5WmNjY2IwZko5a0V1V21JUTVZMng1TEFRdXAKUEY4ODNUYWpXOGw5OTFZV0ZVY1FnRG9iVjhySGRGdTZaMHcwM1BpdFRQRXliTitlQ3o1dEI4cnhlbFhhQXR5SQpoQ2hwU2FsakIvRkVJMGl1OUNRN3UzMmVJZExtcUE3cklScmYxMjdqcXRVelhpUjZHVzNjc1ZubjE3L3R4YytDClFsSjlnajhDQXdFQUFhTW5NQ1V3RGdZRFZSMFBBUUgvQkFRREFnV2dNQk1HQTFVZEpRUU1NQW9HQ0NzR0FRVUYKQndNQ01BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQk8zSVRsbFhCOUNNVk1ITzJlOXJ0eWMrM1R5VHdMK0ltawp4SCtyT3pZYWF6Tm1ZN0FyZmpHME1hdlBidW9aOW50dmExWDBSaXIzT3FtL1RwYzV1OHpKVW1raytiZmluS2dmCndaRFNQVEdHR0taQUp5UXBwbGREenJpVm9GQi9GYlgya0ozblBlZWwrb0F6aVpGYitYendpcFJ5TnVGR0g3REcKK2JXTi9yZ1BxalRNcXRzaG9rMFdMM1JHRW8xSmVWYmY1akMycHM5cXFJZWs5SVJJenI1TEMvQ1VSaDNKTW9WZQpFVmtOY283d25qR2pCbzh2b1o0b0hSOW9IeHN1T3BmSjN0SVRjNE0zK3kzRUM3cG5IRnA0R2EvVXlhVFdRMWNYCnRqNVNiVWtSdUJLdzZuTm9CVlo2dUlUQStTcjJlYkZkZEExYjBmY2JVcXduanNHL1N0NXkKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+      client-key-data: LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBeUpHdUtFalVqajh0MWgxVU1BRUNORWtPVEk0YkJBNXhTZE9Ya1FncWlDQTZSMSsrClRpUTBGNUNJcnFER29oTnl6Z2NQdCtHTWlpWkVUbEd2QXpTU0k5V0VpaDZoUmkrNnJqRUdweDhYTzJaSUR6cjkKa2NqMEpwbjJqQVd3eCtOWVBxMEZONUF2UzNsVmViQTkvT1YyVkhsVjRCYkt4NVRHZEtiMHlGc0VoeU55d2ltZgpPY0xmMWx4eHh2UjhuMlFTNWFZaERsamJIa3NCQzZrOFh6emROcU5ieVgzM1ZoWVZSeENBT2h0WHlzZDBXN3BuClREVGMrSzFNOFRKczM1NExQbTBIeXZGNlZkb0MzSWlFS0dsSnFXTUg4VVFqU0s3MEpEdTdmWjRoMHVhb0R1c2gKR3QvWGJ1T3ExVE5lSkhvWmJkeXhXZWZYdiszRno0SkNVbjJDUHdJREFRQUJBb0lCQUZwL3VVaCtERUtlNlV5NgpjUmt6NjAyeVJSeHY1bXEvSllqOVMxOXFndDVuUkVTZVE5MDRZclRiUjRFY0ZHUmZTQ2NFY3FneXdsbzNpQXlhCnVOQkdjVVp2K2x6a0V6cjdJRTJtMjJ5ZkQ3bUNuak1aRi84bTRGdG1qeU9CRWRJdmw4cTRBU21nQ21jUXVXdXUKQlZwT0kwVmNkazRsbXB2UlduYWFPc3NJbnBObXMzZW1yN2U0RnhEODFXVXVBK21JbW1TUXIwUnY4azQ1WkRnVgp0MWZkcC9YVEV1Z3VSUTQ0THBudi9nOU00YUNwcFU2dk5ScU5WNnh0d0wwcmVPRS95djVTcFpIK3E3RTducGJZCkdSYWNtTkVnZzNvSTJBSlBlOStWS00vV01zRk1aZUJoNXNnSnZzNS8xa0dwcURrc3pad3VjZzl2cDR4RGRaWjAKVDVudWFwRUNnWUVBNys3cmtzOFNFbXpEaVZyTmNXZnJpZFErZzNqZS9INmtjc0lSeXNOSmVGdjhrZDZ1N0hyVgpMRzk5dVc5WGtybnQ5SHJuMS9mMjB5Z3lvVTJteFlOQXBKWmhnTWZyWTFjK1RuZTBxbmx1SlVERjBURkordkl4CmRPOStEdkpwelFycExxbzBzc1AwT3BMbmJqTFZxOVBSWkdqZHN6UCt1SzRiUzNPQm9JNDhaUWtDZ1lFQTFmLzAKZ3ZzMjVRQ2puUXR5NVpSU29HRlRvdWd2Tm5kUG5maFdHSmR1aHB6ZGcwWFllZ1M0R2pyZnlCOXFKdHhYZkt3VwpZK3lmREZYb2FDUE94OXl4UEF1RytHZndHRUprRHVRNFRMSXRvSHdxN3p5OXIrZzh4a3c4Yjl0NUpuWVZiVTBoCjdOakJaS3dqOHdCREVYVlpBdXpYbWNsNDVpejRpMjZYRjZQWGh3Y0NnWUF4dTBQNDJoTFUzdFpvMGZsaldEYnEKQ3FRcWZCTThJc1BUUllhS2tJL1o4cmNYUlNEY3cxa01MTS9TYjlHbkNBTGFlZDgwVktGRWcwQjdUcTBTbzNIeQpxM2pxU0lYeHdWT1kwQmNTZnJqbDM5Y2cxU2FRYlVMekNmRUhDQmdGK0F6OUx5cGRJMkNzQTJjVTRGU0ptUTM5CjBmNmg5bFVGMHBDMXd1dExiQy80Z1FLQmdCbkFHTjRCK0pNSnhxWkpFR1JMdXIyTnVKQ3J1N0trSExKM2hYU2sKRkNxaWlZMFlSSG82UXlUMDNLU3FFdzNtQ2FqNDFDRG1BaVZyMlBGZkRhekRBNWlrRW5PbG5pQnRMTGtXQVNoSgpjSEFWUU4xVXc4WjgvWU1tL1ViQWRBMkt1LzFSQUxvTlF3Z29KcE5BL3RFRSs5YjhSTjArZnd2RGNZemxtOHkrCmJGclZBb0dCQUp3TmdINkgrWEZFcGx6bFpILzZvbEJoa3ljcnBiOTZGTmN3eXA5cGNSUXhsaC9tZGNFd2lBSDYKbXhDUG1IY2JlcEZlejNlVGpaUnJOeFdRMFp6UGQyVk5VbFZXUE1uV3Vadk0wWFJhRng5YmdqY2hLUERhU0N4SwpXaTYxcHFKcUZVSlRzQjM5WWdjZk1TTjI3WVBzbHVEWlI1MkVrTDFlT3Nkb2pBTm54R0VqCi0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==
+  
+  [root@k8s-master prometheus]# echo LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJeU1UQXhNREF6TURjek0xb1hEVE15TVRBd056QXpNRGN6TTFvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTFI5CldQazUvRFYyZTJZWEx0NUcySW03ajNoSGRrSndiTUVqRFFLd1FyMXZNVUc0WWw4dmQxMk9odjIvYkRHUlh6T0sKRTR6ZEhRVEZKV1dLRTNhSHJYcGpUSnBuOWNBc2YxN2VFcy9RWHczVk03bmllZzIxY204bjc4akRUaTdaQUI0ZApmTWRYNmJscWx3U05LOGc0RUV5L1BFZjhjdzhOY25oTjZGSkJzc3p6MTMzVkFFM0w5QWVuUlppUklFNDNnaEhaCkJQRFY4aEpkQ3cyMDlTaHBranNvRXM1YWJyL3JQV1F6OVgvdzRlNGgyU1FXb2xXUERQckdIeStqeDloa2RkMDQKa1EvYnZaOEdFZDl3aWhaYXNvelA0VmNOYk5UR0ZQbmpNUjM0dkE0U3BTQ2U1VFZWZkQ0ZitFRW9IM3NET25vbgpldGM3NldsSUpkMkY3Q2Q3ZWpFQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZJSGlTWFZDNXRXRmJZWUwxdm1ya3VjMlJseVNNQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCL2NZMVFtd3ZZN09EeDQ1WVcveExTRWlmcTRvc08xTFF6bXdJcFBodW5FWEFoa3NWcAp3bkdCL3JTdjhjNzVwOVhmUG1pWTNNaXJpNENIU1lRSnBXWGY0YUZ1ZDJ0MnNvVmdkTkNGeE50QlNzU1NBY1JmCk5LdkJLZzZtS1YxUUEvaG5HbklMU1Rhd2YxdGdrVERMNmEwQTkzSk1NMENZNWRwK084RnhDOEN3RFlWelRCQXoKa3RIS3p1RU9QbCszWGhSSFJldGJjUHM1L2pPbVBicmZHK1JReWhtSmJhZE5BRGV2QVBFZnNhajFQVTNWTU1DVQpVWFlDc2JMU1ZaSEhRT2Yyd202L0JBWS93Zkdaclo1OXpVUndUZnFJSTd4Q2R3Qnc4ZG5CL24rcDhtQUs3SnFUCkZwYWZPdUgralRxQnlJR0VSWUFPRzhwVS9NQkpHckphRjM2ZQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==|base64 -d
+  -----BEGIN CERTIFICATE-----
+  MIIC5zCCAc+gAwIBAgIBADANBgkqhkiG9w0BAQsFADAVMRMwEQYDVQQDEwprdWJl
+  cm5ldGVzMB4XDTIyMTAxMDAzMDczM1oXDTMyMTAwNzAzMDczM1owFTETMBEGA1UE
+  AxMKa3ViZXJuZXRlczCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALR9
+  WPk5/DV2e2YXLt5G2Im7j3hHdkJwbMEjDQKwQr1vMUG4Yl8vd12Ohv2/bDGRXzOK
+  E4zdHQTFJWWKE3aHrXpjTJpn9cAsf17eEs/QXw3VM7nieg21cm8n78jDTi7ZAB4d
+  fMdX6blqlwSNK8g4EEy/PEf8cw8NcnhN6FJBsszz133VAE3L9AenRZiRIE43ghHZ
+  BPDV8hJdCw209ShpkjsoEs5abr/rPWQz9X/w4e4h2SQWolWPDPrGHy+jx9hkdd04
+  kQ/bvZ8GEd9wihZasozP4VcNbNTGFPnjMR34vA4SpSCe5TVVfD4f+EEoH3sDOnon
+  etc76WlIJd2F7Cd7ejECAwEAAaNCMEAwDgYDVR0PAQH/BAQDAgKkMA8GA1UdEwEB
+  /wQFMAMBAf8wHQYDVR0OBBYEFIHiSXVC5tWFbYYL1vmrkuc2RlySMA0GCSqGSIb3
+  DQEBCwUAA4IBAQB/cY1QmwvY7ODx45YW/xLSEifq4osO1LQzmwIpPhunEXAhksVp
+  wnGB/rSv8c75p9XfPmiY3Miri4CHSYQJpWXf4aFud2t2soVgdNCFxNtBSsSSAcRf
+  NKvBKg6mKV1QA/hnGnILSTawf1tgkTDL6a0A93JMM0CY5dp+O8FxC8CwDYVzTBAz
+  ktHKzuEOPl+3XhRHRetbcPs5/jOmPbrfG+RQyhmJbadNADevAPEfsaj1PU3VMMCU
+  UXYCsbLSVZHHQOf2wm6/BAY/wfGZrZ59zURwTfqII7xCdwBw8dnB/n+p8mAK7JqT
+  FpafOuH+jTqByIGERYAOG8pU/MBJGrJaF36e
+  -----END CERTIFICATE-----
+  [root@k8s-master prometheus]# echo LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM4ekNDQWR1Z0F3SUJBZ0lKQUp5dWdZbEdzTXMwTUEwR0NTcUdTSWIzRFFFQkN3VUFNQlV4RXpBUkJnTlYKQkFNVENtdDFZbVZ5Ym1WMFpYTXdIaGNOTWpJeE1ERXdNRFV4TlRJMVdoY05Nekl4TURBM01EVXhOVEkxV2pBMApNUmN3RlFZRFZRUUtEQTV6ZVhOMFpXMDZiV0Z6ZEdWeWN6RVpNQmNHQTFVRUF3d1FhM1ZpWlhKdVpYUmxjeTFoClpHMXBiakNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFNaVJyaWhJMUk0L0xkWWQKVkRBQkFqUkpEa3lPR3dRT2NVblRsNUVJS29nZ09rZGZ2azRrTkJlUWlLNmd4cUlUY3M0SEQ3ZmhqSW9tUkU1Ugpyd00wa2lQVmhJb2VvVVl2dXE0eEJxY2ZGenRtU0E4Ni9aSEk5Q2FaOW93RnNNZmpXRDZ0QlRlUUwwdDVWWG13ClBmemxkbFI1VmVBV3lzZVV4blNtOU1oYkJJY2pjc0lwbnpuQzM5WmNjY2IwZko5a0V1V21JUTVZMng1TEFRdXAKUEY4ODNUYWpXOGw5OTFZV0ZVY1FnRG9iVjhySGRGdTZaMHcwM1BpdFRQRXliTitlQ3o1dEI4cnhlbFhhQXR5SQpoQ2hwU2FsakIvRkVJMGl1OUNRN3UzMmVJZExtcUE3cklScmYxMjdqcXRVelhpUjZHVzNjc1ZubjE3L3R4YytDClFsSjlnajhDQXdFQUFhTW5NQ1V3RGdZRFZSMFBBUUgvQkFRREFnV2dNQk1HQTFVZEpRUU1NQW9HQ0NzR0FRVUYKQndNQ01BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQk8zSVRsbFhCOUNNVk1ITzJlOXJ0eWMrM1R5VHdMK0ltawp4SCtyT3pZYWF6Tm1ZN0FyZmpHME1hdlBidW9aOW50dmExWDBSaXIzT3FtL1RwYzV1OHpKVW1raytiZmluS2dmCndaRFNQVEdHR0taQUp5UXBwbGREenJpVm9GQi9GYlgya0ozblBlZWwrb0F6aVpGYitYendpcFJ5TnVGR0g3REcKK2JXTi9yZ1BxalRNcXRzaG9rMFdMM1JHRW8xSmVWYmY1akMycHM5cXFJZWs5SVJJenI1TEMvQ1VSaDNKTW9WZQpFVmtOY283d25qR2pCbzh2b1o0b0hSOW9IeHN1T3BmSjN0SVRjNE0zK3kzRUM3cG5IRnA0R2EvVXlhVFdRMWNYCnRqNVNiVWtSdUJLdzZuTm9CVlo2dUlUQStTcjJlYkZkZEExYjBmY2JVcXduanNHL1N0NXkKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=|base64 -d
+  -----BEGIN CERTIFICATE-----
+  MIIC8zCCAdugAwIBAgIJAJyugYlGsMs0MA0GCSqGSIb3DQEBCwUAMBUxEzARBgNV
+  BAMTCmt1YmVybmV0ZXMwHhcNMjIxMDEwMDUxNTI1WhcNMzIxMDA3MDUxNTI1WjA0
+  MRcwFQYDVQQKDA5zeXN0ZW06bWFzdGVyczEZMBcGA1UEAwwQa3ViZXJuZXRlcy1h
+  ZG1pbjCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMiRrihI1I4/LdYd
+  VDABAjRJDkyOGwQOcUnTl5EIKoggOkdfvk4kNBeQiK6gxqITcs4HD7fhjIomRE5R
+  rwM0kiPVhIoeoUYvuq4xBqcfFztmSA86/ZHI9CaZ9owFsMfjWD6tBTeQL0t5VXmw
+  PfzldlR5VeAWyseUxnSm9MhbBIcjcsIpnznC39Zcccb0fJ9kEuWmIQ5Y2x5LAQup
+  PF883TajW8l991YWFUcQgDobV8rHdFu6Z0w03PitTPEybN+eCz5tB8rxelXaAtyI
+  hChpSaljB/FEI0iu9CQ7u32eIdLmqA7rIRrf127jqtUzXiR6GW3csVnn17/txc+C
+  QlJ9gj8CAwEAAaMnMCUwDgYDVR0PAQH/BAQDAgWgMBMGA1UdJQQMMAoGCCsGAQUF
+  BwMCMA0GCSqGSIb3DQEBCwUAA4IBAQBO3ITllXB9CMVMHO2e9rtyc+3TyTwL+Imk
+  xH+rOzYaazNmY7ArfjG0MavPbuoZ9ntva1X0Rir3Oqm/Tpc5u8zJUmkk+bfinKgf
+  wZDSPTGGGKZAJyQppldDzriVoFB/FbX2kJ3nPeel+oAziZFb+XzwipRyNuFGH7DG
+  +bWN/rgPqjTMqtshok0WL3RGEo1JeVbf5jC2ps9qqIek9IRIzr5LC/CURh3JMoVe
+  EVkNco7wnjGjBo8voZ4oHR9oHxsuOpfJ3tITc4M3+y3EC7pnHFp4Ga/UyaTWQ1cX
+  tj5SbUkRuBKw6nNoBVZ6uITA+Sr2ebFddA1b0fcbUqwnjsG/St5y
+  -----END CERTIFICATE-----
+  
+  [root@k8s-master prometheus]# echo LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFb3dJQkFBS0NBUUVBeUpHdUtFalVqajh0MWgxVU1BRUNORWtPVEk0YkJBNXhTZE9Ya1FncWlDQTZSMSsrClRpUTBGNUNJcnFER29oTnl6Z2NQdCtHTWlpWkVUbEd2QXpTU0k5V0VpaDZoUmkrNnJqRUdweDhYTzJaSUR6cjkKa2NqMEpwbjJqQVd3eCtOWVBxMEZONUF2UzNsVmViQTkvT1YyVkhsVjRCYkt4NVRHZEtiMHlGc0VoeU55d2ltZgpPY0xmMWx4eHh2UjhuMlFTNWFZaERsamJIa3NCQzZrOFh6emROcU5ieVgzM1ZoWVZSeENBT2h0WHlzZDBXN3BuClREVGMrSzFNOFRKczM1NExQbTBIeXZGNlZkb0MzSWlFS0dsSnFXTUg4VVFqU0s3MEpEdTdmWjRoMHVhb0R1c2gKR3QvWGJ1T3ExVE5lSkhvWmJkeXhXZWZYdiszRno0SkNVbjJDUHdJREFRQUJBb0lCQUZwL3VVaCtERUtlNlV5NgpjUmt6NjAyeVJSeHY1bXEvSllqOVMxOXFndDVuUkVTZVE5MDRZclRiUjRFY0ZHUmZTQ2NFY3FneXdsbzNpQXlhCnVOQkdjVVp2K2x6a0V6cjdJRTJtMjJ5ZkQ3bUNuak1aRi84bTRGdG1qeU9CRWRJdmw4cTRBU21nQ21jUXVXdXUKQlZwT0kwVmNkazRsbXB2UlduYWFPc3NJbnBObXMzZW1yN2U0RnhEODFXVXVBK21JbW1TUXIwUnY4azQ1WkRnVgp0MWZkcC9YVEV1Z3VSUTQ0THBudi9nOU00YUNwcFU2dk5ScU5WNnh0d0wwcmVPRS95djVTcFpIK3E3RTducGJZCkdSYWNtTkVnZzNvSTJBSlBlOStWS00vV01zRk1aZUJoNXNnSnZzNS8xa0dwcURrc3pad3VjZzl2cDR4RGRaWjAKVDVudWFwRUNnWUVBNys3cmtzOFNFbXpEaVZyTmNXZnJpZFErZzNqZS9INmtjc0lSeXNOSmVGdjhrZDZ1N0hyVgpMRzk5dVc5WGtybnQ5SHJuMS9mMjB5Z3lvVTJteFlOQXBKWmhnTWZyWTFjK1RuZTBxbmx1SlVERjBURkordkl4CmRPOStEdkpwelFycExxbzBzc1AwT3BMbmJqTFZxOVBSWkdqZHN6UCt1SzRiUzNPQm9JNDhaUWtDZ1lFQTFmLzAKZ3ZzMjVRQ2puUXR5NVpSU29HRlRvdWd2Tm5kUG5maFdHSmR1aHB6ZGcwWFllZ1M0R2pyZnlCOXFKdHhYZkt3VwpZK3lmREZYb2FDUE94OXl4UEF1RytHZndHRUprRHVRNFRMSXRvSHdxN3p5OXIrZzh4a3c4Yjl0NUpuWVZiVTBoCjdOakJaS3dqOHdCREVYVlpBdXpYbWNsNDVpejRpMjZYRjZQWGh3Y0NnWUF4dTBQNDJoTFUzdFpvMGZsaldEYnEKQ3FRcWZCTThJc1BUUllhS2tJL1o4cmNYUlNEY3cxa01MTS9TYjlHbkNBTGFlZDgwVktGRWcwQjdUcTBTbzNIeQpxM2pxU0lYeHdWT1kwQmNTZnJqbDM5Y2cxU2FRYlVMekNmRUhDQmdGK0F6OUx5cGRJMkNzQTJjVTRGU0ptUTM5CjBmNmg5bFVGMHBDMXd1dExiQy80Z1FLQmdCbkFHTjRCK0pNSnhxWkpFR1JMdXIyTnVKQ3J1N0trSExKM2hYU2sKRkNxaWlZMFlSSG82UXlUMDNLU3FFdzNtQ2FqNDFDRG1BaVZyMlBGZkRhekRBNWlrRW5PbG5pQnRMTGtXQVNoSgpjSEFWUU4xVXc4WjgvWU1tL1ViQWRBMkt1LzFSQUxvTlF3Z29KcE5BL3RFRSs5YjhSTjArZnd2RGNZemxtOHkrCmJGclZBb0dCQUp3TmdINkgrWEZFcGx6bFpILzZvbEJoa3ljcnBiOTZGTmN3eXA5cGNSUXhsaC9tZGNFd2lBSDYKbXhDUG1IY2JlcEZlejNlVGpaUnJOeFdRMFp6UGQyVk5VbFZXUE1uV3Vadk0wWFJhRng5YmdqY2hLUERhU0N4SwpXaTYxcHFKcUZVSlRzQjM5WWdjZk1TTjI3WVBzbHVEWlI1MkVrTDFlT3Nkb2pBTm54R0VqCi0tLS0tRU5EIFJTQSBQUklWQVRFIEtFWS0tLS0tCg==|base64 -d
+  -----BEGIN RSA PRIVATE KEY-----
+  MIIEowIBAAKCAQEAyJGuKEjUjj8t1h1UMAECNEkOTI4bBA5xSdOXkQgqiCA6R1++
+  TiQ0F5CIrqDGohNyzgcPt+GMiiZETlGvAzSSI9WEih6hRi+6rjEGpx8XO2ZIDzr9
+  kcj0Jpn2jAWwx+NYPq0FN5AvS3lVebA9/OV2VHlV4BbKx5TGdKb0yFsEhyNywimf
+  OcLf1lxxxvR8n2QS5aYhDljbHksBC6k8XzzdNqNbyX33VhYVRxCAOhtXysd0W7pn
+  TDTc+K1M8TJs354LPm0HyvF6VdoC3IiEKGlJqWMH8UQjSK70JDu7fZ4h0uaoDush
+  Gt/XbuOq1TNeJHoZbdyxWefXv+3Fz4JCUn2CPwIDAQABAoIBAFp/uUh+DEKe6Uy6
+  cRkz602yRRxv5mq/JYj9S19qgt5nRESeQ904YrTbR4EcFGRfSCcEcqgywlo3iAya
+  uNBGcUZv+lzkEzr7IE2m22yfD7mCnjMZF/8m4FtmjyOBEdIvl8q4ASmgCmcQuWuu
+  BVpOI0Vcdk4lmpvRWnaaOssInpNms3emr7e4FxD81WUuA+mImmSQr0Rv8k45ZDgV
+  t1fdp/XTEuguRQ44Lpnv/g9M4aCppU6vNRqNV6xtwL0reOE/yv5SpZH+q7E7npbY
+  GRacmNEgg3oI2AJPe9+VKM/WMsFMZeBh5sgJvs5/1kGpqDkszZwucg9vp4xDdZZ0
+  T5nuapECgYEA7+7rks8SEmzDiVrNcWfridQ+g3je/H6kcsIRysNJeFv8kd6u7HrV
+  LG99uW9Xkrnt9Hrn1/f20ygyoU2mxYNApJZhgMfrY1c+Tne0qnluJUDF0TFJ+vIx
+  dO9+DvJpzQrpLqo0ssP0OpLnbjLVq9PRZGjdszP+uK4bS3OBoI48ZQkCgYEA1f/0
+  gvs25QCjnQty5ZRSoGFTougvNndPnfhWGJduhpzdg0XYegS4GjrfyB9qJtxXfKwW
+  Y+yfDFXoaCPOx9yxPAuG+GfwGEJkDuQ4TLItoHwq7zy9r+g8xkw8b9t5JnYVbU0h
+  7NjBZKwj8wBDEXVZAuzXmcl45iz4i26XF6PXhwcCgYAxu0P42hLU3tZo0fljWDbq
+  CqQqfBM8IsPTRYaKkI/Z8rcXRSDcw1kMLM/Sb9GnCALaed80VKFEg0B7Tq0So3Hy
+  q3jqSIXxwVOY0BcSfrjl39cg1SaQbULzCfEHCBgF+Az9LypdI2CsA2cU4FSJmQ39
+  0f6h9lUF0pC1wutLbC/4gQKBgBnAGN4B+JMJxqZJEGRLur2NuJCru7KkHLJ3hXSk
+  FCqiiY0YRHo6QyT03KSqEw3mCaj41CDmAiVr2PFfDazDA5ikEnOlniBtLLkWAShJ
+  cHAVQN1Uw8Z8/YMm/UbAdA2Ku/1RALoNQwgoJpNA/tEE+9b8RN0+fwvDcYzlm8y+
+  bFrVAoGBAJwNgH6H+XFEplzlZH/6olBhkycrpb96FNcwyp9pcRQxlh/mdcEwiAH6
+  mxCPmHcbepFez3eTjZRrNxWQ0ZzPd2VNUlVWPMnWuZvM0XRaFx9bgjchKPDaSCxK
+  Wi61pqJqFUJTsB39YgcfMSN27YPsluDZR52EkL1eOsdojANnxGEj
+  -----END RSA PRIVATE KEY-----
+  ```
+  
+  
 
 > 面板没有数据怎么办？
 
@@ -1265,6 +1551,8 @@ $ kubectl -n monitor delete po grafana-594f447d6c-jmjsw
 ###### [自定义监控面板](http://49.7.203.222:3000/#/prometheus/grafana/add-grafana-metrics?id=自定义监控面板)
 
 通用的监控需求基本上都可以使用第三方的Dashboard来解决，对于业务应用自己实现的指标的监控面板，则需要我们手动进行创建。
+
+web界面右边菜单 加号 new dashboard –》 Edit Panel
 
 调试Panel：直接输入Metrics，查询数据。
 
@@ -1314,7 +1602,7 @@ TSDB的样本分布示意图：
     <------------------ 时间 ---------------->
 ```
 
-Guage类型：
+Gauge类型：
 
 ```bash
 $ kubectl -n monitor get po -o wide |grep k8s-master
@@ -1531,18 +1819,20 @@ Alertmanager， https://github.com/prometheus/alertmanager#install
 alertmanager.yml配置文件格式：
 
 ```bash
-$ cat config.yml
+# mkdir alertmanager
+# cd alertmanager/
+cat > config.yml <<\EOF
 apiVersion: v1
 data:
   config.yml: |
-    global: 
+    global:
       # 当alertmanager持续多长时间未接收到告警后标记告警状态为 resolved
       resolve_timeout: 5m
       # 配置邮件发送信息
       smtp_smarthost: 'smtp.163.com:25'
-      smtp_from: 'earlene163@163.com'
-      smtp_auth_username: 'earlene163@163.com'
-      smtp_auth_password: 'GENLAXFHNDWNVVVL'
+      smtp_from: '343264992@163.com'
+      smtp_auth_username: '343264992@163.com'
+      smtp_auth_password: 'TTDIQQDRGRNEWJGI'
       smtp_require_tls: false
     # 所有报警信息进入后的根路由，用来设置报警的分发策略
     route:
@@ -1551,9 +1841,9 @@ data:
       # 当一个新的报警分组被创建后，需要等待至少 group_wait 时间来初始化通知，如果在等待时间内当前group接收到了新的告警，这些告警将会合并为一个通知向receiver发送
       group_wait: 30s
 
-      # 相同的group发送告警通知的时间间隔
+      # 相同的group发送告警通知的时间间隔 # 一半设置10分钟
       group_interval: 30s
-      # 如果一个报警信息已经发送成功了，等待 repeat_interval 时间来重新发送
+      # 如果一个报警信息已经发送成功了，等待 repeat_interval 时间来重新发送  #正常按小时 或者天
       repeat_interval: 1m
 
       # 默认的receiver：如果一个报警没有被一个route匹配，则发送给默认的接收器
@@ -1566,12 +1856,102 @@ data:
     receivers:
     - name: 'default'
       email_configs:
-      - to: '654147123@qq.com'
+      - to: '343264992@qq.com'
         send_resolved: true  # 接受告警恢复的通知
 kind: ConfigMap
 metadata:
   name: alertmanager
   namespace: monitor
+EOF
+
+# 去掉注释版本
+cat > config.yml <<\EOF
+apiVersion: v1
+data:
+  config.yml: |
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'smtp.163.com:25'
+      smtp_from: '343264992@163.com'
+      smtp_auth_username: '343264992@163.com'
+      smtp_auth_password: 'TTDIQQDRGRNEWJGI'
+      smtp_require_tls: false
+    route:
+      group_by: ['alertname']
+      group_wait: 30s
+      group_interval: 10m
+      repeat_interval: 1d
+      receiver: default
+      routes:
+      - {}
+    receivers:
+    - name: 'default'
+      email_configs:
+      - to: '343264992@qq.com'
+        send_resolved: true
+kind: ConfigMap
+metadata:
+  name: alertmanager
+  namespace: monitor
+EOF
+
+# 上面的文件创建创建成功后， -oyaml时候会有\n 显示不正常
+---------------------从文件创建ConfigMap
+cat > config.yml <<\EOF
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.163.com:25'
+  smtp_from: '343264992@163.com'
+  smtp_auth_username: '343264992@163.com'
+  smtp_auth_password: 'TTDIQQDRGRNEWJGI'
+  smtp_require_tls: false
+route:
+  group_by: ['alertname']
+  group_wait: 30s
+  group_interval: 10m
+  repeat_interval: 1d
+  receiver: default
+  routes:
+  - {}
+receivers:
+- name: 'default'
+  email_configs:
+  - to: '343264992@qq.com'
+    send_resolved: true
+EOF
+
+kubectl -n monitor create cm alertmanager --from-file=config.yml
+[root@k8s-master alertmanager]# kubectl -n monitor get cm alertmanager -oyaml
+
+
+[root@k8s-master alertmanager]# cat -A config.yml  # 查看文件是否有多余的空格
+apiVersion: v1$
+kind: ConfigMap$
+metadata:$
+  name: alertmanager$
+  namespace: monitor$
+data:$
+  config.yml: |$
+    global: $  #这里冒号后面有一个空格， 这样创建之后用-oyaml显示的时候会显示\n的符号现象
+      resolve_timeout: 5m$
+      smtp_smarthost: 'smtp.163.com:25'$
+      smtp_from: '343264992@163.com'$
+      smtp_auth_username: '343264992@163.com'$
+      smtp_auth_password: 'TTDIQQDRGRNEWJGI'$
+      smtp_require_tls: false$
+    route:$
+      group_by: ['alertname']$
+      group_wait: 30s$
+      group_interval: 10m$
+      repeat_interval: 1d$
+      receiver: default$
+      routes:$
+      - {}$
+    receivers:$
+    - name: 'default'$
+      email_configs:$
+      - to: '343264992@qq.com'$
+        send_resolved: true$
 ```
 
 主要配置的作用：
@@ -1595,7 +1975,7 @@ $ kubectl apply -f  config.yml
 其他资源清单文件:
 
 ```bash
-$ cat alertmanager-all.yaml
+cat > alertmanager-all.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1667,6 +2047,15 @@ spec:
             name: alertmanager
             port:
               number: 9093
+EOF
+
+# kubectl apply -f alertmanager-all.yaml
+# kubectl -n monitor get ing
+# 宿主机配置hosts
+$ sudo vi /etc/hosts
+10.211.55.25 wordpress.luffy.com harbor.luffy.com kibana.luffy.com prometheus.luffy.com grafana.luffy.com alertmanager.luffy.com
+# kubectl -n monitor get po
+
 ```
 
 ###### [配置Prometheus与Alertmanager对话](http://49.7.203.222:3000/#/prometheus/alertmanager/install?id=配置prometheus与alertmanager对话)
@@ -1686,8 +2075,11 @@ spec:
 因此，修改Prometheus的配置文件，然后重新加载pod
 
 ```bash
+[root@k8s-master alertmanager]# kubectl -n monitor get cm
+NAME                DATA   AGE
+alertmanager        1      2m30s
 # 编辑prometheus-configmap.yaml配置，添加alertmanager内容
-$ kuectl -n monitor edit configmap prometheus-config
+$ kubectl -n monitor edit configmap prometheus-config
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1702,22 +2094,26 @@ data:
       alertmanagers:
       - static_configs:
         - targets:
-          - alertmanager:9093
+          - alertmanager:9093 # 把注释去掉
 ...
   
   
-$ kubectl apply -f prometheus-configmap.yaml
+$ # kubectl apply -f prometheus-configmap.yaml
+# kubectl -n monitor get cm
+# kubectl -n monitor get svc
 
 # 现在已经有监控数据了，因此使用prometheus提供的reload的接口，进行服务重启
 
 # 查看配置文件是否已经自动加载到pod中
 $ kubectl -n monitor get po -o wide
-prometheus-dcb499cbf-pljfn            1/1     Running   0          47h    10.244.1.167  
+prometheus-dcb499cbf-pljfn            1/1     Running   0          47h    10.244.0.101
 
-$ kubectl -n monitor exec -ti prometheus-dcb499cbf-pljfn cat /etc/prometheus/prometheus.yml |grep alertmanager
-
+# kubectl -n monitor exec -ti prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml|grep alertmanager
+Defaulted container "prometheus" out of: prometheus, change-permission-of-directory (init)
+  alertmanagers:
+      - alertmanager:9093
 # 使用软加载的方式，
-$ curl -X POST 10.244.1.167:9090/-/reload
+$ curl -X POST 10.244.0.101:9090/-/reload
 ```
 
 
@@ -1731,7 +2127,7 @@ $ curl -X POST 10.244.1.167:9090/-/reload
 在哪里配置？同样是在prometheus-configmap中：
 
 ```bash
-$ kuectl -n monitor edit configmap prometheus-config
+$ kubectl -n monitor edit configmap prometheus-config
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1762,7 +2158,7 @@ data:
 rules.yml我们同样使用configmap的方式挂载到prometheus容器内部，因此只需要在已有的configmap中加一个数据项目
 
 ```bash
-$ vim prometheus-configmap.yaml
+cat > prometheus-configmap.yaml <</EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -1798,7 +2194,133 @@ data:
         annotations:
           summary: "{{$labels.instance}}: Low node load detected"
           description: "{{$labels.instance}}: node load is below 1 (current value is: {{ $value }}"
+EOF
+
 ```
+
+
+
+上两步的操作记录
+
+```bash
+[root@k8s-master alertmanager]# kubectl -n monitor exec -ti prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/prometheus.yml > prometheus.yml
+Defaulted container "prometheus" out of: prometheus, change-permission-of-directory (init)
+[root@k8s-master alertmanager]# vi prometheus.yml
+cat > prometheus.yml <<\EOF
+# my global config
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  # scrape_timeout is set to the global default (10s).
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets:
+      - alertmanager:9093
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - /etc/prometheus/alert_rules.yml   #新增行
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+# A scrape configuration containing exactly one endpoint to scrape:
+# Here it's Prometheus itself.
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+    - targets: ['localhost:9090']
+  - job_name: 'kubernetes-apiserver'
+    static_configs:
+    - targets: ['10.96.0.1']
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  - job_name: 'kubernetes-sd-node-exporter'
+    kubernetes_sd_configs:
+      - role: node
+    relabel_configs:
+    - source_labels: [__address__]
+      regex: '(.*):10250'
+      replacement: '${1}:9100'
+      target_label: __address__
+      action: replace
+  - job_name: 'kubernetes-sd-cadvisor'
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+    relabel_configs:
+    - target_label: __metrics_path__
+      replacement: /metrics/cadvisor
+  - job_name: 'kubernetes-sd-kubelet'
+    kubernetes_sd_configs:
+      - role: node
+    scheme: https
+    tls_config:
+      ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      insecure_skip_verify: true
+    bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+  - job_name: 'kubernetes-sd-endpoints'
+    kubernetes_sd_configs:
+      - role: endpoints
+    relabel_configs:
+    - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+      action: keep
+      regex: true
+    - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+      action: replace
+      target_label: __metrics_path__
+      regex: (.+)
+    - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+      action: replace
+      target_label: __address__
+      regex: ([^:]+)(?::\d+)?;(\d+)
+      replacement: $1:$2
+EOF
+------
+[root@k8s-master alertmanager]# vi alert_rules.yml
+cat > alert_rules.yml <<\EOF
+groups:
+- name: node_metrics
+  rules:
+  - alert: NodeLoad
+    expr: node_load15 < 1
+    for: 2m
+    annotations:
+      summary: "{{$labels.instance}}: Low node load detected"
+      description: "{{$labels.instance}}: node load is below 1 (current value is: {{ $value }}"
+EOF
+[root@k8s-master alertmanager]# kubectl -n monitor delete cm prometheus-config
+configmap "prometheus-config" deleted
+[root@k8s-master alertmanager]# kubectl -n monitor create cm prometheus-config --from-file=prometheus.yml --from-file=alert_rules.yml
+configmap/prometheus-config created
+
+[root@k8s-master alertmanager]# kubectl -n monitor get cm prometheus-config -oyaml  #检查结果是不是正常显示
+
+[root@k8s-master alertmanager]# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- ls /etc/prometheus
+Defaulted container "prometheus" out of: prometheus, change-permission-of-directory (init)
+alert_rules.yml
+prometheus.yml
+
+[root@k8s-master alertmanager]# kubectl -n monitor get po -owide
+NAME                                  READY   STATUS    RESTARTS   AGE   IP             NODE                  
+prometheus-7d6799c84c-6mvn7           1/1     Running   4          42h   10.244.0.101   k8s-master          
+
+[root@k8s-master alertmanager]# curl -XPOST 10.244.0.101:9090/-/reload
+
+[root@k8s-master alertmanager]# kubectl -n monitor logs  alertmanager-796996c79f-wnnfc |grep "Received alert"
+# 有记录就可以去邮箱查看收到的告警信息
+```
+
+
 
 告警规则的几个要素：
 
@@ -1920,9 +2442,24 @@ https://oapi.dingtalk.com/robot/send?access_token=f628f749a7ad70e86ca7bcb68658d0
 curl 'https://oapi.dingtalk.com/robot/send?access_token=f628f749a7ad70e86ca7bcb68658d0ce5af7c201ce8ce32acaece4c592364ca9' \
    -H 'Content-Type: application/json' \
    -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
+   
+
+# 开发群
+curl 'https://oapi.dingtalk.com/robot/send?access_token=cf2e7575e4a16bbbabbe5ec0ab848e73d5cc63d22dcd47edd24faf4f832b135c' \
+   -H 'Content-Type: application/json' \
+   -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
+   
+# 业务告警群
+curl 'https://oapi.dingtalk.com/robot/send?access_token=6971a3c609e5892473c7eecf2d7fdbb18d26f31a2b96af0e6c9f6fa2e24d421a' \
+   -H 'Content-Type: application/json' \
+   -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'   
+   
+   
 ```
 
 https://gitee.com/agagin/prometheus-webhook-dingtalk
+
+[程康华/prometheus-webhook-dingtalk (gitee.com)](https://gitee.com/chengkanghua/prometheus-webhook-dingtalk)
 
 镜像地址：timonwong/prometheus-webhook-dingtalk:master
 
@@ -1937,9 +2474,9 @@ $ ./prometheus-webhook-dingtalk --config.file=config.yml
 ```bash
 targets:
   webhook_dev:
-    url: https://oapi.dingtalk.com/robot/send?access_token=f33c539fa1012e0b3500f04ea98fb89468829ed324699d67ecd2f177a1dcc0c2
+    url: https://oapi.dingtalk.com/robot/send?access_token=cf2e7575e4a16bbbabbe5ec0ab848e73d5cc63d22dcd47edd24faf4f832b135c
   webhook_ops:
-    url: https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e
+    url: https://oapi.dingtalk.com/robot/send?access_token=6971a3c609e5892473c7eecf2d7fdbb18d26f31a2b96af0e6c9f6fa2e24d421a
 ```
 
 则prometheus-webhook-dingtalk启动后会自动支持如下API的POST访问：
@@ -1960,25 +2497,32 @@ http://localhost:8060/dingtalk/webhook_ops/send
 配置文件：
 
 ```bash
-$ cat webhook-dingtalk-configmap.yaml
+[root@k8s-master alertmanager]# mkdir webhook
+[root@k8s-master alertmanager]# cd webhook
+cat > webhook-dingtalk-configmap.yaml <<\EOF
 apiVersion: v1
 data:
   config.yml: |
     targets:
       webhook_dev:
-        url: https://oapi.dingtalk.com/robot/send?access_token=f33c539fa1012e0b3500f04ea98fb89468829ed324699d67ecd2f177a1dcc0c2
+        url: https://oapi.dingtalk.com/robot/send?access_token=cf2e7575e4a16bbbabbe5ec0ab848e73d5cc63d22dcd47edd24faf4f832b135c
       webhook_ops:
-        url: https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e
+        url: https://oapi.dingtalk.com/robot/send?access_token=6971a3c609e5892473c7eecf2d7fdbb18d26f31a2b96af0e6c9f6fa2e24d421a
 kind: ConfigMap
 metadata:
   name: webhook-dingtalk-config
   namespace: monitor
+EOF
+
+# kubectl create -f webhook-dingtalk-configmap.yaml
+# kubectl -n monitor get cm
+# kubectl -n monitor get cm webhook-dingtalk-config -oyaml
 ```
 
 Deployment和Service
 
 ```bash
-$ cat webhook-dingtalk-deploy.yaml
+cat > webhook-dingtalk-deploy.yaml <<\EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -2033,6 +2577,11 @@ spec:
   - name: hook
     port: 8060
     targetPort: http
+EOF
+
+[root@k8s-master webhook]# kubectl apply -f webhook-dingtalk-deploy.yaml
+deployment.apps/webhook-dingtalk created
+
 ```
 
 创建：
@@ -2041,13 +2590,18 @@ spec:
 $ kubectl apply -f webhook-dingtalk-configmap.yaml
 $ kubectl apply -f webhook-dingtalk-deploy.yaml
 
+[root@k8s-master webhook]# kubectl -n monitor get po -owide
+NAME                                  READY   STATUS    RESTARTS   AGE     IP             NODE       
+webhook-dingtalk-7d98bd5db8-zm2h2     1/1     Running   0          115s    10.244.2.100   k8s-slave2           
 # 查看日志，可以得知当前的可用webhook日志
-$ kubectl -n monitor logs -f webhook-dingtalk-f7f5589c9-qglkd
-...
-file=/etc/prometheus-webhook-dingtalk/config.yml msg="Completed loading of configuration file"
-level=info ts=2020-07-30T14:05:40.963Z caller=main.go:117 component=configuration msg="Loading templates" templates=
-ts=2020-07-30T14:05:40.963Z caller=main.go:133 component=configuration msg="Webhook urls for prometheus alertmanager" urls="http://localhost:8060/dingtalk/webhook_dev/send http://localhost:8060/dingtalk/webhook_ops/send"
-level=info ts=2020-07-30T14:05:40.963Z caller=web.go:210 component=web msg="Start listening for connections" address=:8060
+# kubectl -n monitor logs -f webhook-dingtalk-7d98bd5db8-zm2h2
+level=info ts=2022-10-27T14:48:55.088Z caller=main.go:60 msg="Starting prometheus-webhook-dingtalk" version="(version=2.0.0, branch=master, revision=4e77a3cc3e7a23fcb18b33826bce8d2904583465)"
+level=info ts=2022-10-27T14:48:55.284Z caller=main.go:61 msg="Build context" (gogo1.16.7,userroot@337ecc9a2774,date20210819-13:17:15)=(MISSING)
+level=info ts=2022-10-27T14:48:55.285Z caller=coordinator.go:83 component=configuration file=/etc/prometheus-webhook-dingtalk/config.yml msg="Loading configuration file"
+level=info ts=2022-10-27T14:48:55.285Z caller=coordinator.go:91 component=configuration file=/etc/prometheus-webhook-dingtalk/config.yml msg="Completed loading of configuration file"
+level=info ts=2022-10-27T14:48:55.285Z caller=main.go:98 component=configuration msg="Loading templates" templates=
+ts=2022-10-27T14:48:55.286Z caller=main.go:114 component=configuration msg="Webhook urls for prometheus alertmanager" urls="http://localhost:8060/dingtalk/webhook_dev/send http://localhost:8060/dingtalk/webhook_ops/send"
+level=info ts=2022-10-27T14:48:55.286Z caller=web.go:210 component=web msg="Start listening for connections" address=:8060
 ```
 
 修改Alertmanager路由及webhook配置：
@@ -2066,10 +2620,10 @@ data:
       resolve_timeout: 5m
       # 配置邮件发送信息
       smtp_smarthost: 'smtp.163.com:25'
-      smtp_from: 'earlene163@163.com'
-      smtp_auth_username: 'earlene163@163.com'
+      smtp_from: '343264992@163.com'
+      smtp_auth_username: '343264992@163.com'
       # 注意这里不是邮箱密码，是邮箱开启第三方客户端登录后的授权码
-      smtp_auth_password: 'GXIWNXKMMEVMNHAJ'
+      smtp_auth_password: 'TTDIQQDRGRNEWJGI'
       smtp_require_tls: false
     # 所有报警信息进入后的根路由，用来设置报警的分发策略
     route:
@@ -2093,11 +2647,14 @@ data:
     receivers:
     - name: 'default'
       email_configs:
-      - to: '654147123@qq.com'
+      - to: '343264992@qq.com'
         send_resolved: true  # 接受告警恢复的通知
       webhook_configs:
       - send_resolved: true
-        url: http://webhook-dingtalk:8060/dingtalk/webhook_dev/send
+        url: http://localhost:8060/dingtalk/webhook_dev/send
+        
+        
+[root@k8s-master alertmanager]# kubectl -n monitor logs -f alertmanager-796996c79f-wnnfc
 ```
 
 验证钉钉消息是否正常收到。
@@ -2133,36 +2690,45 @@ receivers:
 因此可以为了更全面的感受报警的逻辑，我们再添加两个报警规则：
 
 ```bash
-  alert_rules.yml: |
-    groups:
-    - name: node_metrics
-      rules:
-      - alert: NodeLoad
-        expr: node_load15 < 1
-        for: 2m
-        labels:
-          severity: normal
-        annotations:
-          summary: "{{$labels.instance}}: Low node load detected"
-          description: "{{$labels.instance}}: node load is below 1 (current value is: {{ $value }}"
-      - alert: NodeMemoryUsage
-        expr: (node_memory_MemTotal_bytes - (node_memory_MemFree_bytes + node_memory_Buffers_bytes + node_memory_Cached_bytes)) / node_memory_MemTotal_bytes * 100 > 30
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "{{$labels.instance}}: High Memory usage detected"
-          description: "{{$labels.instance}}: Memory usage is above 40% (current value is: {{ $value }}"
-    - name: targets_status
-      rules:
-      - alert: TargetStatus
-        expr: up == 0
-        for: 1m
-        labels:
-          severity: critical
-        annotations:
-          summary: "{{$labels.instance}}: prometheus target down"
-          description: "{{$labels.instance}}: prometheus target down，job is {{$labels.job}}"
+cat > alert_rules.yml <<\EOF
+groups:
+- name: node_metrics
+  rules:
+  - alert: NodeLoad
+    expr: node_load15 < 1
+    for: 2m
+    labels:
+      severity: normal
+    annotations:
+      summary: "{{$labels.instance}}: Low node load detected"
+      description: "{{$labels.instance}}: node load is below 1 (current value is: {{ $value }}"
+  - alert: NodeMemoryUsage
+    expr: (node_memory_MemTotal_bytes - (node_memory_MemFree_bytes + node_memory_Buffers_bytes + node_memory_Cached_bytes)) / node_memory_MemTotal_bytes * 100 > 30
+    for: 2m
+    labels:
+      severity: critical
+    annotations:
+      summary: "{{$labels.instance}}: High Memory usage detected"
+      description: "{{$labels.instance}}: Memory usage is above 40% (current value is: {{ $value }}"
+- name: targets_status
+  rules:
+  - alert: TargetStatus
+    expr: up == 0
+    for: 1m
+    labels:
+      severity: critical
+    annotations:
+      summary: "{{$labels.instance}}: prometheus target down"
+      description: "{{$labels.instance}}: prometheus target down，job is {{$labels.job}}"
+EOF
+
+[root@k8s-master alertmanager]# kubectl -n monitor delete cm prometheus-config
+[root@k8s-master alertmanager]# kubectl -n monitor create cm prometheus-config --from-file=prometheus.yml --from-file=alert_rules.yml
+
+# 查看文件是不是生效
+# kubectl -n monitor get po
+# kubectl -n monitor exec prometheus-7d6799c84c-6mvn7 -- cat /etc/prometheus/alert_rules.yml
+# curl -XPOST 10.244.0.119:9090/-/reload  # prometheus pod ip地址
 ```
 
 我们为不同的报警规则设置了不同的标签，如`severity: critical`，针对规则中的label，来配置alertmanager路由规则，实现转发给不同的接收者。
