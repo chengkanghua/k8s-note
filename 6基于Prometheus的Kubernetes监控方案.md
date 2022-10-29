@@ -2445,12 +2445,12 @@ curl 'https://oapi.dingtalk.com/robot/send?access_token=f628f749a7ad70e86ca7bcb6
    
 
 # 开发群
-curl 'https://oapi.dingtalk.com/robot/send?access_token=cf2e7575e4a16bbbabbe5ec0ab848e73d5cc63d22dcd47edd24faf4f832b135c' \
+curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
    -H 'Content-Type: application/json' \
    -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
    
 # 业务告警群
-curl 'https://oapi.dingtalk.com/robot/send?access_token=6971a3c609e5892473c7eecf2d7fdbb18d26f31a2b96af0e6c9f6fa2e24d421a' \
+curl 'https://oapi.dingtalk.com/robot/send?access_token=71060597773f564f36b3aca0e17c7835c6950ea706a8cf1d1b8b8f1efcc15683' \
    -H 'Content-Type: application/json' \
    -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'   
    
@@ -2474,9 +2474,9 @@ $ ./prometheus-webhook-dingtalk --config.file=config.yml
 ```bash
 targets:
   webhook_dev:
-    url: https://oapi.dingtalk.com/robot/send?access_token=cf2e7575e4a16bbbabbe5ec0ab848e73d5cc63d22dcd47edd24faf4f832b135c
+    url: https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744
   webhook_ops:
-    url: https://oapi.dingtalk.com/robot/send?access_token=6971a3c609e5892473c7eecf2d7fdbb18d26f31a2b96af0e6c9f6fa2e24d421a
+    url: https://oapi.dingtalk.com/robot/send?access_token=71060597773f564f36b3aca0e17c7835c6950ea706a8cf1d1b8b8f1efcc15683
 ```
 
 则prometheus-webhook-dingtalk启动后会自动支持如下API的POST访问：
@@ -2505,9 +2505,9 @@ data:
   config.yml: |
     targets:
       webhook_dev:
-        url: https://oapi.dingtalk.com/robot/send?access_token=cf2e7575e4a16bbbabbe5ec0ab848e73d5cc63d22dcd47edd24faf4f832b135c
+        url: https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744
       webhook_ops:
-        url: https://oapi.dingtalk.com/robot/send?access_token=6971a3c609e5892473c7eecf2d7fdbb18d26f31a2b96af0e6c9f6fa2e24d421a
+        url: https://oapi.dingtalk.com/robot/send?access_token=71060597773f564f36b3aca0e17c7835c6950ea706a8cf1d1b8b8f1efcc15683
 kind: ConfigMap
 metadata:
   name: webhook-dingtalk-config
@@ -2745,12 +2745,12 @@ data:
     global:
       # 当alertmanager持续多长时间未接收到告警后标记告警状态为 resolved
       resolve_timeout: 5m
-      # 配置邮件发送信息
+  		# 配置邮件发送信息
       smtp_smarthost: 'smtp.163.com:25'
-      smtp_from: 'earlene163@163.com'
-      smtp_auth_username: 'earlene163@163.com'
+      smtp_from: '343264992@163.com'
+      smtp_auth_username: '343264992@163.com'
       # 注意这里不是邮箱密码，是邮箱开启第三方客户端登录后的授权码
-      smtp_auth_password: 'RMAOPQVHKLPYFVHZ'
+      smtp_auth_password: 'TTDIQQDRGRNEWJGI'
       smtp_require_tls: false
     # 所有报警信息进入后的根路由，用来设置报警的分发策略
     route:
@@ -2781,34 +2781,61 @@ data:
     receivers:
     - name: 'default'
       email_configs:
-      - to: '654147123@qq.com'
+      - to: '343264992@qq.com'
         send_resolved: true  # 接受告警恢复的通知
     - name: 'critical_alerts'
       webhook_configs:
       - send_resolved: true
-        url: http://webhook-dingtalk:8060/dingtalk/webhook_ops/send
+        url: http://localhost:8060/dingtalk/webhook_ops/send
     - name: 'normal_alerts'
       webhook_configs:
       - send_resolved: true
-        url: http://webhook-dingtalk:8060/dingtalk/webhook_dev/send
+        url: http://localhost:8060/dingtalk/webhook_dev/send
+        
+
+[root@k8s-master webhook]# kubectl -n monitor edit cm alertmanager
 ```
 
 再配置一个钉钉机器人，修改webhook-dingtalk的配置，添加webhook_ops的配置：
 
 ```bash
-$ cat webhook-dingtalk-configmap.yaml
+cat > webhook-dingtalk-configmap.yaml <<\EOF
 apiVersion: v1
 data:
   config.yml: |
     targets:
       webhook_dev:
-        url: https://oapi.dingtalk.com/robot/send?access_token=f628f749a7ad70e86ca7bcb68658d0ce5af7c201ce8ce32acaece4c592364ca9
+        url: https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744
       webhook_ops:
-        url: https://oapi.dingtalk.com/robot/send?access_token=5a68888fbecde75b1832ff024d7374e51f2babd33f1078e5311cdbb8e2c00c3a
+        url: https://oapi.dingtalk.com/robot/send?access_token=71060597773f564f36b3aca0e17c7835c6950ea706a8cf1d1b8b8f1efcc15683
 kind: ConfigMap
 metadata:
   name: webhook-dingtalk-config
   namespace: monitor
+EOF
+
+[root@k8s-master webhook]# kubectl apply -f webhook-dingtalk-configmap.yaml
+
+---- 文件操作
+[root@k8s-master webhook]# vi webhook-dingtalk-configmap.yaml
+[root@k8s-master webhook]# cat webhook-dingtalk-configmap.yaml
+targets:
+  webhook_dev:
+    url: https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744
+  webhook_ops:
+    url: https://oapi.dingtalk.com/robot/send?access_token=71060597773f564f36b3aca0e17c7835c6950ea706a8cf1d1b8b8f1efcc15683
+[root@k8s-master webhook]# kubectl -n monitor delete cm webhook-dingtalk-config
+[root@k8s-master webhook]# kubectl -n monitor create cm webhook-dingtalk-config --from-file=webhook-dingtalk-configmap.yaml
+[root@k8s-master webhook]# kubectl -n monitor get cm webhook-dingtalk-config -oyaml
+
+# 重启容器
+[root@k8s-master alertmanager]# kubectl -n monitor get deploy
+NAME                 READY   UP-TO-DATE   AVAILABLE   AGE
+alertmanager         1/1     1            1           13h
+[root@k8s-master alertmanager]# kubectl -n monitor scale deployment alertmanager --replicas=0
+deployment.apps/alertmanager scaled
+[root@k8s-master alertmanager]# kubectl -n monitor scale deployment alertmanager --replicas=1
+deployment.apps/alertmanager scaled
 ```
 
 分别更新Prometheus和Alertmanager配置，查看报警的发送。
@@ -2937,6 +2964,10 @@ $ yum install -y jq
 
 ```bash
 $ git clone -b v0.8.4 https://github.com/DirectXMan12/k8s-prometheus-adapter.git
+[root@k8s-master ~]# cd k8s-prometheus-adapter/
+[root@k8s-master k8s-prometheus-adapter]# git remote -v
+origin	https://github.com/DirectXMan12/k8s-prometheus-adapter.git (fetch)
+origin	https://github.com/DirectXMan12/k8s-prometheus-adapter.git (push)
 ```
 
 查看部署说明 https://github.com/DirectXMan12/k8s-prometheus-adapter/tree/v0.8.4/deploy
@@ -2946,6 +2977,9 @@ $ git clone -b v0.8.4 https://github.com/DirectXMan12/k8s-prometheus-adapter.git
 2. 准备证书
 
    ```bash
+   [root@k8s-master k8s-prometheus-adapter]# cd deploy/
+   [root@k8s-master deploy]# mkdir cert;cd cert
+   
    $ export PURPOSE=serving
    $ openssl req -x509 -sha256 -new -nodes -days 3650 -newkey rsa:2048 -keyout ${PURPOSE}.key -out ${PURPOSE}.crt -subj "/CN=ca"
    
@@ -2953,6 +2987,24 @@ $ git clone -b v0.8.4 https://github.com/DirectXMan12/k8s-prometheus-adapter.git
    
    # 查看证书
    $ kubectl -n monitor describe secret cm-adapter-serving-certs
+   
+   [root@k8s-master cert]# cd ../
+   [root@k8s-master deploy]# cd manifests/
+   [root@k8s-master manifests]# pwd
+   /root/k8s-prometheus-adapter/deploy/manifests
+   [root@k8s-master manifests]# ll
+   总用量 44
+   -rw-r--r--. 1 root root  312 10月 28 10:30 custom-metrics-apiserver-auth-delegator-cluster-role-binding.yaml
+   -rw-r--r--. 1 root root  333 10月 28 10:30 custom-metrics-apiserver-auth-reader-role-binding.yaml
+   -rw-r--r--. 1 root root 1416 10月 28 10:30 custom-metrics-apiserver-deployment.yaml
+   -rw-r--r--. 1 root root  315 10月 28 10:30 custom-metrics-apiserver-resource-reader-cluster-role-binding.yaml
+   -rw-r--r--. 1 root root  107 10月 28 10:30 custom-metrics-apiserver-service-account.yaml
+   -rw-r--r--. 1 root root  196 10月 28 10:30 custom-metrics-apiserver-service.yaml
+   -rw-r--r--. 1 root root  979 10月 28 10:30 custom-metrics-apiservice.yaml
+   -rw-r--r--. 1 root root  217 10月 28 10:30 custom-metrics-cluster-role.yaml
+   -rw-r--r--. 1 root root 3817 10月 28 10:30 custom-metrics-config-map.yaml
+   -rw-r--r--. 1 root root  219 10月 28 10:30 custom-metrics-resource-reader-cluster-role.yaml
+   -rw-r--r--. 1 root root  313 10月 28 10:30 hpa-custom-metrics-cluster-role-binding.yaml
    ```
 
 3. 替换命名空间
@@ -2960,6 +3012,8 @@ $ git clone -b v0.8.4 https://github.com/DirectXMan12/k8s-prometheus-adapter.git
    ```bash
    # 资源清单文件默认用的命名空间是custom-metrics，替换为本例中使用的monitor
    $ sed -i 's/namespace: custom-metrics/namespace: monitor/g' manifests/*
+   
+   [root@k8s-master deploy]# sed -i 's/namespace: custom-metrics/namespace: monitor/g' manifests/*
    ```
 
 4. 配置adapter对接的Prometheus地址
@@ -2973,13 +3027,13 @@ $ git clone -b v0.8.4 https://github.com/DirectXMan12/k8s-prometheus-adapter.git
         19       serviceAccountName: custom-metrics-apiserver
         20       containers:
         21       - name: custom-metrics-apiserver
-        22         image: directxman12/k8s-prometheus-adapter-amd64:v0.7.0
+        22         image: directxman12/k8s-prometheus-adapter-amd64:v0.7.0  #修改
         23         args:
         24         - --secure-port=6443
         25         - --tls-cert-file=/var/run/serving-cert/serving.crt
         26         - --tls-private-key-file=/var/run/serving-cert/serving.key
         27         - --logtostderr=true
-        28         - --prometheus-url=http://prometheus:9090/
+        28         - --prometheus-url=http://prometheus:9090/   #修改
         29         - --metrics-relist-interval=1m
         30         - --v=10
         31         - --config=/etc/adapter/config.yaml
@@ -3000,12 +3054,15 @@ $ git clone -b v0.8.4 https://github.com/DirectXMan12/k8s-prometheus-adapter.git
      config.yaml: |
        rules:
        - {}
+       
    $ kubectl apply -f manifests/
    ```
 
 验证一下：
 
 ```bash
+[root@k8s-master deploy]# kubectl -n monitor get po |grep custom
+custom-metrics-apiserver-5fb669c8c5-74sdd   1/1     Running     0          54s
 $ kubectl api-versions|grep metrics
 custom.metrics.k8s.io/v1beta1
 custom.metrics.k8s.io/v1beta2
@@ -3034,7 +3091,7 @@ $ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta2 |jq
 为了演示效果，我们新建一个deployment来模拟业务应用。
 
 ```bash
-$ cat custom-metrics-demo.yaml
+cat > custom-metrics-demo.yaml <<\EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -3057,6 +3114,8 @@ spec:
             cpu: 50m
           requests:
             cpu: 50m
+EOF
+
 ```
 
 部署：
@@ -3065,18 +3124,18 @@ spec:
 $ kubectl apply -f custom-metrics-demo.yaml
 
 $ kubectl get po -o wide
-custom-metrics-demo-95b5bc949-xpppl   1/1     Running   0          65s   10.244.1.194
+custom-metrics-demo-95b5bc949-xpppl   1/1     Running   0          65s   10.244.2.105
 
-$ curl 10.244.1.194:8080/metrics
+$ curl 10.244.2.105:8080/metrics
 # HELP http_requests_total The amount of requests served by the server in total
 # TYPE http_requests_total counter
-http_requests_total 2
+http_requests_total 1
 ```
 
 注册为Prometheus的target：
 
 ```bash
-$ cat custom-metrics-demo-svc.yaml
+cat > custom-metrics-demo-svc.yaml <<\EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -3092,6 +3151,26 @@ spec:
   selector:
     app: custom-metrics-demo
   type: ClusterIP
+EOF
+
+[root@k8s-master k8s-prometheus-adapter]# kubectl apply -f custom-metrics-demo-svc.yaml
+service/custom-metrics-demo created
+[root@k8s-master k8s-prometheus-adapter]# kubectl get po
+NAME                                   READY   STATUS    RESTARTS   AGE
+custom-metrics-demo-84cfff78fb-pl577   1/1     Running   0          60m
+nfs-pvc-7cd57855b4-bb7wl               1/1     Running   14         7d8h
+[root@k8s-master k8s-prometheus-adapter]# kubectl get svc
+NAME                  TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+custom-metrics-demo   ClusterIP   10.97.236.195   <none>        80/TCP    12s
+kubernetes            ClusterIP   10.96.0.1       <none>        443/TCP   18d
+nginx                 ClusterIP   None            <none>        80/TCP    4d8h
+
+[root@k8s-master k8s-prometheus-adapter]# kubectl get deploy
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+custom-metrics-demo   2/2     2            2           89m
+nfs-pvc               1/1     1            1           7d9h
+[root@k8s-master k8s-prometheus-adapter]#  kubectl scale deployment custom-metrics-demo --replicas=2
+deployment.apps/custom-metrics-demo scaled
 ```
 
 自动注册为Prometheus的采集Targets。
@@ -3149,6 +3228,7 @@ spec:
 同样，如果想获得每个业务应用最近1分钟内每秒的访问次数，也是根据总数来做计算，因此，需要使用业务自定义指标`http_requests_total`，配合`rate`方法即可获取每秒钟的请求数。
 
 ```bash
+# 浏览器http://prometheus.luffy.com/graph 查询
 rate(http_requests_total[2m])
 
 # 如查询有多条数据，需做汇聚，需要使用sum
@@ -3180,6 +3260,8 @@ sum(rate(http_requests_total[2m])) by(kubernetes_pod_name)
        overrides:
          kubernetes_namespace: {resource: "namespace"}
          kubernetes_pod_name: {resource: "pod"}
+         
+   # http://prometheus.luffy.com/graph  搜索  container_threads   里面对应是这里的namespace 和pod 一样的名称       
    ```
 
    hpa 拿着k8s里的namepace和pod名称，来查询adaptor，adaptor去查询Prometheus的时候根据resources的适配来转换，namepace=default, pod=front-app-xxxx, kubernetes_namespace="default"
@@ -3209,7 +3291,7 @@ sum(rate(http_requests_total[2m])) by(kubernetes_pod_name)
 
 因为Adapter转换完之后的指标含义为：每秒钟的请求数。因此提供指标名称，该配置根据正则表达式做了匹配替换，转换完后的指标名称为：`http_requests_per_second`，HPA规则中可以直接配置该名称。
 
-1. 告诉Adapter如何获取最终的自定义指标值
+5. 告诉Adapter如何获取最终的自定义指标值
 
    ```bash
        rules:
@@ -3247,6 +3329,7 @@ sum(rate(http_requests_total[2m])) by(kubernetes_pod_name)
 更新Adapter的配置：
 
 ```bash
+[root@k8s-master deploy]# vi manifests/custom-metrics-configmap.yaml   
 $ vi custom-metrics-configmap.yaml
 apiVersion: v1
 kind: ConfigMap
@@ -3265,6 +3348,8 @@ data:
       name:
         as: "http_requests_per_second"
       metricsQuery: (sum(rate(<<.Series>>{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>))
+      
+   
 ```
 
 需要更新configmap并重启adapter服务：
@@ -3272,13 +3357,17 @@ data:
 ```bash
 $ kubectl apply -f custom-metrics-configmap.yaml
 
-$ kubectl -n monitor delete po custom-metrics-apiserver-c689ff947-zp8gq
+[root@k8s-master deploy]# kubectl -n monitor get po
+NAME                                        READY   STATUS      RESTARTS   AGE
+custom-metrics-apiserver-5fb669c8c5-74sdd   1/1     Running     0          120m
+
+[root@k8s-master deploy]# kubectl -n monitor delete po custom-metrics-apiserver-5fb669c8c5-74sdd  #重启po 
 ```
 
 再次查看可用的指标数据：
 
 ```bash
-$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 |jq
+$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 |jq   #这里暂时没出这个结果
 {
   "kind": "APIResourceList",
   "apiVersion": "v1",
@@ -3304,6 +3393,23 @@ $ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 |jq
     }
   ]
 }
+
+# 解决上面问题
+[root@k8s-master alertmanager]# kubectl  -n monitor get cm
+[root@k8s-master alertmanager]# kubectl -n monitor edit cm prometheus-config
+          replacement: $1:$2  #下面内容增加
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: kubernetes_namespace
+        - source_labels: [__meta_kubernetes_service_name]
+          action: replace
+          target_label: kubernetes_service_name
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: kubernetes_pod_name
+          
+[root@k8s-master alertmanager]# kubectl -n monitor delete po custom-metrics-apiserver-5fb669c8c5-mv2q8  # 重启po
+[root@k8s-master alertmanager]# kubectl -n monitor delete po prometheus-7d6799c84c-6mvn7  # 等待几分钟
 ```
 
 实际中，hpa会去对如下地址发起请求，获取数据：
@@ -3356,7 +3462,7 @@ https://github.com/DirectXMan12/k8s-prometheus-adapter/blob/master/docs/config.m
 ###### [配置HPA实现自定义指标的业务伸缩](http://49.7.203.222:3000/#/prometheus/hpa-custom?id=配置hpa实现自定义指标的业务伸缩)
 
 ```bash
-$ cat hpa-custom-metrics.yaml
+cat > hpa-custom-metrics.yaml <<\EOF
 apiVersion: autoscaling/v2beta1
 kind: HorizontalPodAutoscaler
 metadata:
@@ -3373,9 +3479,11 @@ spec:
   - type: Pods
     pods:
       metricName: http_requests_per_second
+      #过去1分钟每秒超过10次之后扩容
       targetAverageValue: 10
-      
-$ kubectl apply -f hpa-custom-metrics.yaml
+EOF
+
+[root@k8s-master deploy]# kubectl apply -f hpa-custom-metrics.yaml
 
 $ kubectl get hpa
 ```
@@ -3386,15 +3494,18 @@ $ kubectl get hpa
 
 ```bash
 $ kubectl get svc -o wide
-custom-metrics-demo   ClusterIP   10.104.110.245   <none>        80/TCP    16h
+custom-metrics-demo   ClusterIP   10.97.236.195   <none>        80/TCP    16h
 
-$ ab -n1000 -c 5 http://10.104.110.245:80/
+$ ab -n1000 -c 5 http://10.97.236.195:80/
 ```
 
 观察hpa变化:
 
 ```bash
-$ kubectl describe hpa nginx-custom-hpa
+$ kubectl describe hpa custom-metrics-demo 
+[root@k8s-master deploy]# kubectl get hpa -w 
+NAME                  REFERENCE                        TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
+custom-metrics-demo   Deployment/custom-metrics-demo   33m/10    1         3         3          6m24s
 ```
 
 查看adapter日志：
@@ -3473,7 +3584,7 @@ spec:
 可以通过正则匹配的方式，实现对于同一类别的业务指标的定义：
 
 ```bash
-$ cat custom-metrics-configmap.yaml
+cat > custom-metrics-configmap.yaml <<\EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -3494,6 +3605,11 @@ data:
         matches: ^(.*)_total$
         as: "${1}_per_second"
       metricsQuery: sum(rate(<<.Series>>{<<.LabelMatchers>>}[1m])) by (<<.GroupBy>>)
+EOF
+
+[root@k8s-master k8s-prometheus-adapter]# kubectl apply -f custom-metrics-configmap.yaml
+[root@k8s-master k8s-prometheus-adapter]# kubectl -n monitor delete po custom-metrics-apiserver-5fb669c8c5-84lww
+[root@k8s-master k8s-prometheus-adapter]# kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 |jq
 ```
 
 coredns_dns_requests_per_second

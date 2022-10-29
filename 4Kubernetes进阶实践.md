@@ -128,15 +128,16 @@ $ etcdctl snapshot save `hostname`-etcd_`date +%Y%m%d%H%M`.db
 $ kubectl get ns
 NAME                           STATUS                    AGE
 business-java-backend4h99k   Terminationg          2d22h
-$ etcdctl get / --prefix=true --key-only|grep business-java-backend4h99k
+$ etcdctl get / --prefix=true --keys-only|grep business-java-backend4h99k
+$ etcdctl get / --prefix=true --keys-only
 .
 ..
 ...
 ....
-$ etcd del .  #复制上面查询到的数据
-$ etcd del ..
-$ etcd del ...
-$ etcd del ....
+$ etcdctl del .  #复制上面查询到的数据
+$ etcdctl del ..
+$ etcdctl del ...
+$ etcdctl del ....
 $ kubectl get ns   # 再次查看已没有business-java-backend4h99k
 ```
 

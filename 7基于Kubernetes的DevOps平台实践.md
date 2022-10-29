@@ -88,8 +88,9 @@ devops = 提倡开发、测试、运维协同工作来实现持续开发、持�
 4. ingress来外部访问
 5. 数据存储通过pvc挂载到宿主机中
 
-```
-jenkins/jenkins-all.yaml
+```bash
+[root@k8s-master ~]# mkdir jenkins
+cat > jenkins/jenkins-all.yaml <<\EOF
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -206,13 +207,27 @@ spec:
             name: jenkins
             port:
               number: 8080
+EOF
+
+# 实验环境 java虚拟机内存给小点（笔记本内存16G）虚拟机总是OOM ***坑
+ value: "-Xms512m -Xmx1024m -Duser.timezone=Asia/Shanghai -Dhudson.model.DirectoryBrowserSupport.CSP="
+
 ```
 
 创建服务：
 
 ```bash
+# kubectl create ns jenkins #不用提前创建 上面的yaml第一部分就是创建namespace
 ## 部署服务
 $ kubectl create -f jenkins-all.yaml
+namespace/jenkins created
+persistentvolumeclaim/jenkins created
+serviceaccount/jenkins created
+Warning: rbac.authorization.k8s.io/v1beta1 ClusterRoleBinding is deprecated in v1.17+, unavailable in v1.22+; use rbac.authorization.k8s.io/v1 ClusterRoleBinding
+clusterrolebinding.rbac.authorization.k8s.io/jenkins-crb created
+deployment.apps/jenkins-master created
+service/jenkins created
+ingress.networking.k8s.io/jenkins-web created
 ## 查看服务
 $ kubectl -n jenkins get po
 NAME                              READY   STATUS    RESTARTS   AGE
@@ -242,7 +257,7 @@ This may also be found at: /var/jenkins_home/secrets/initialAdminPassword
 使用jenkins启动日志中的密码，或者执行下面的命令获取解锁的管理员密码：
 
 ```bash
-$ kubectl -n jenkins exec jenkins-master-767df9b574-lgdr5 bash 
+$ kubectl -n jenkins exec -ti jenkins-master-767df9b574-lgdr5 bash 
 / # cat /var/jenkins_home/secrets/initialAdminPassword
 35b083de1d25409eaef57255e0da481a
 ```
@@ -317,9 +332,10 @@ run: sidekiq: (pid 1969) 28s; run: log: (pid 1967) 28s
 1. 准备secret文件
 
    ```bash
-   $ cat gitlab-secret.txt
+   cat > gitlab-secret.txt <<EOF
    postgres.user.root=root
    postgres.pwd.root=1qaz2wsx
+   EOF
    
    $ kubectl -n jenkins create secret generic gitlab-secret --from-env-file=gitlab-secret.txt
    ```
@@ -331,7 +347,7 @@ run: sidekiq: (pid 1969) 28s; run: log: (pid 1967) 28s
    - 使用secret来引用账户密码
 
 ```bash
-$ cat postgres.yaml
+cat > postgres.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -411,13 +427,13 @@ spec:
       - name: postgredb
         persistentVolumeClaim:
           claimName: postgredb
-   
+EOF
    
    #创建postgres
    $ kubectl create -f postgres.yaml
    
    # 创建数据库gitlab,为后面部署gitlab组件使用
-   $ kubectl -n jenkins exec -ti postgres-7ff9b49f4c-nt8zh bash
+   $ kubectl -n jenkins exec -ti postgres-7ff9b49f4c-nt8zh -- bash
    root@postgres-7ff9b49f4c-nt8zh:/# psql
    root=# create database gitlab;
    CREATE DATABASE
@@ -426,7 +442,7 @@ spec:
 1. 部署redis
 
    ```bash
-   $ cat redis.yaml
+   cat > redis.yaml <<EOF
    apiVersion: v1
    kind: Service
    metadata:
@@ -475,7 +491,7 @@ spec:
              requests:
                cpu: 50m
                memory: 100Mi
-               
+   EOF
    # 创建
    $ kubectl create -f redis.yaml
    ```
@@ -491,7 +507,14 @@ spec:
    - 数据库名称为gitlab
 
 ```bash
-$ cat gitlab.yaml
+# kubectl -n jenkins get po
+# kubectl -n jenkins logs -f postgres-xxxx
+# kubectl -n jenkins exec -ti postgres-xxx -- bash
+---# psql
+---# create database gitlab;
+---# \l
+---# exit
+cat > gitlab.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -611,8 +634,13 @@ spec:
       - name: data
         persistentVolumeClaim:
           claimName: gitlab
-   # 创建
-   $ kubectl create -f gitlab.yaml
+EOF
+
+# 实验环境可以适当给小资源
+# 创建
+$ kubectl create -f gitlab.yaml 
+# kubectl -n jenkins get po
+# kubectl -n jenkins logs -f gitlab-xxx
 ```
 
 配置hosts解析：
@@ -628,19 +656,40 @@ spec:
 *配置k8s-master节点的hosts*
 
 ```bash
-$ echo "172.21.51.143 gitlab.luffy.com" >>/etc/hosts
+$ echo "10.211.55.25 gitlab.luffy.com" >>/etc/hosts
 ```
 
 *myblog项目推送到gitlab*
 
 ```bash
-mkdir demo
-cp -r python-demo demo/
-cd demo/myblog
-git remote rename origin old-origin
-git remote add origin http://gitlab.luffy.com/root/myblog.git
-git push -u origin --all
-git push -u origin --tags
+# gitlab 创建一个组叫luffy。 luffy组里再创建一个项目myblog
+
+[root@k8s-master jenkins]# git clone https://gitee.com/chengkanghua/python-demo.git
+cd python-demo
+
+cat > Dockerfile <<\EOF
+FROM centos:centos7.5.1804
+LABEL maintainer="inspur_lyx@hotmail.com"
+ENV LANG en_US.UTF-8
+ENV LC_ALL en_US.UTF-8
+RUN curl -so /etc/yum.repos.d/Centos-7.repo http://mirrors.aliyun.com/repo/Centos-7.repo && rpm -Uvh http://nginx.org/packages/centos/7/noarch/RPMS/nginx-release-centos-7-0.el7.ngx.noarch.rpm
+RUN yum install -y  python36 python3-devel gcc pcre-devel zlib-devel make net-tools nginx
+WORKDIR /opt/myblog
+COPY . .
+COPY myblog.conf /etc/nginx
+RUN pip3 install -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r requirements.txt
+RUN chmod +x run.sh && rm -rf ~/.cache/pip
+EXPOSE 8002
+CMD ["./run.sh"]
+EOF
+[root@k8s-master python-demo]# git config --global user.email "chengkanghua@foxmail.com"
+[root@k8s-master python-demo]# git config --global user.name "chengkanghua"
+[root@k8s-master python-demo]# git add Dockerfile
+[root@k8s-master python-demo]# git commit -m "add Dockerfile"
+[root@k8s-master python-demo]# git remote rename origin old-origin
+[root@k8s-master python-demo]# git remote add origin http://gitlab.luffy.com/luffy/myblog.git
+[root@k8s-master python-demo]# git push -u origin --all
+
 ```
 
 *钉钉推送*
@@ -652,13 +701,9 @@ git push -u origin --tags
 - 试验发送消息
 
   ```bash
-  $ curl 'https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e' \
+  curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
      -H 'Content-Type: application/json' \
-     -d '{"msgtype": "text", 
-          "text": {
-               "content": "我就是我, 是不一样的烟火"
-          }
-        }'
+     -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
   ```
 
 ###### [演示过程](http://49.7.203.222:3000/#/devops/basic-usage?id=演示过程)
@@ -681,41 +726,50 @@ git push -u origin --tags
 
    登录gitlab，选择user->Settings->access tokens新建一个访问token
 
+   name： jenkins    过期时间不选   获得一个这样的token：obwV4UxESTB8ct7cQZAU
+
+   jenkins 添加凭据。类型gitlab api token。   粘贴token。id写gitlab-api-token
+
 4. 配置host解析
 
    由于我们的Jenkins和gitlab域名是本地解析，因此需要让gitlab和Jenkins服务可以解析到对方的域名。两种方式：
 
    - 在容器内配置hosts
 
-   - 配置coredns的静态解析
+   - 配置coredns的静态解析.   `kubectl -n kube-system edit cm coredns`
 
      ```bash
+             ready #下面增加内容。定位
              hosts {
-                 172.21.51.143 jenkins.luffy.com  gitlab.luffy.com
+                 10.211.55.25 jenkins.luffy.com  gitlab.luffy.com
                  fallthrough
              }
+             
+     # 重启coredns
+     kubectl -n kube-system scale deployment coredns --replicas=0
+     kubectl -n kube-system scale deployment coredns --replicas=1
      ```
 
-5. 创建自由风格项目
+5. 创建自由风格项目。name： free-demo
 
    - gitlab connection 选择为刚创建的gitlab
    - 源码管理选择Git，填项项目地址
-   - 新建一个 Credentials 认证，使用用户名密码方式，配置gitlab的用户和密码
+   - 新建一个 Credentials 认证，使用用户名密码方式，配置gitlab的用户和密码.  Id:gitlab_user
    - 构建触发器选择 Build when a change is pushed to GitLab
-   - 生成一个Secret token
+   - 高级–》点击 Generate 生成一个Secret token
    - 保存
 
 6. 到gitlab配置webhook
 
-   - 进入项目下settings->Integrations
-   - URL： http://jenkins.luffy.com/project/free
+   - 进入项目下settings->Webhooks
+   - URL： http://gitlab.luffy.com/luffy/myblog/hooks
    - Secret Token 填入在Jenkins端生成的token
-   - Add webhook
+   - 点击 Add webhook
    - test push events，报错：Requests to the local network are not allowed
 
 7. 设置gitlab允许向本地网络发送webhook请求
 
-   访问 Admin Aera -> Settings -> Network ，展开Outbound requests
+   访问 Admin Aera -> Settings -> Network ，展开Outbound requests    //http://gitlab.luffy.com/admin/application_settings/network
 
    Collapse，勾选第一项即可。再次test push events，成功。
 
@@ -723,7 +777,26 @@ git push -u origin --tags
 
 8. 配置free项目，增加构建步骤，执行shell，将发送钉钉消息的shell保存
 
-9. 提交代码到gitlab仓库，查看构建是否自动执行
+```shell
+curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
+   -H 'Content-Type: application/json' \
+   -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
+```
+
+1. 提交代码到gitlab仓库，查看构建是否自动执行
+
+```bash
+[root@k8s-slave1 ~]# git clone http://gitlab.luffy.com/luffy/myblog.git
+[root@k8s-slave1 ~]# cd myblog/
+[root@k8s-slave1 myblog]# git config --global user.email "chengkanghua@foxmail.com"
+[root@k8s-slave1 myblog]# git config --global user.name "chengkanghua"
+[root@k8s-slave1 myblog]# git config --global push.default simple  #低版本git才会提示
+[root@k8s-slave1 myblog]# sed -i "s#我的博客列表#我的博客列表1#g" blog/templates/index.html
+[root@k8s-slave1 myblog]# git status
+[root@k8s-slave1 myblog]# git add .
+[root@k8s-slave1 myblog]# git commit -m "modify"
+[root@k8s-slave1 myblog]# git push
+```
 
 
 
@@ -748,16 +821,20 @@ git push -u origin --tags
 2. 执行java命令启动agent服务
 
    ```bash
-   ## 登录172.21.51.68，下载agent.jar
-   $ wget http://jenkins.luffy.com/jnlpJars/agent.jar
-   ## 会提示找不到agent错误，因为没有配置地址解析，由于连接jenkins master会通过50000端口，直接使用cluster-ip
-   $ kubectl -n jenkins get svc #在master节点执行查询cluster-ip地址
-   NAME      TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)              AGE
-   jenkins   ClusterIP   10.99.204.208   <none>        8080/TCP,50000/TCP   4h8m
+   ## 登录172.21.51.68，下载agent.jar  配置好host 
+   # echo '10.211.55.25 jenkins.luffy.com gitlab.luffy.com/' >> /etc/hosts
+   #提前安装好 openjdk 与 jenkins-master一样版本 和git 
+   # yum search openjdk
+   $ yum install -y java-11-openjdk.x86_64 git
+   git config --global user.email "chengkanghua@foxmail.com"
+   git config --global user.name "chengkanghua"
+   git config --global push.default simple  #低版本git才会提示
+   
    
    ## 再次回到68节点
-   $ wget 10.99.204.208:8080/jnlpJars/agent.jar
-   $ java -jar agent.jar -jnlpUrl http://10.99.204.208:8080/computer/172.21.51.68/slave-agent.jnlp -secret 4be4d164f861d2830835653567867a1e695b30c320d35eca2be9f5624f8712c8 -workDir "/opt/jenkins_jobs"
+   $ wget http://jenkins.luffy.com/jnlpJars/agent.jar
+   # echo 04d5a1ba3e76b016bb1ee1589bdde3b934b4a4777f3b931c92ec95d11e7acc68 > secret-file
+   # java -jar agent.jar -jnlpUrl http://jenkins.luffy.com/computer/10%2E211%2E55%2E27/jenkins-agent.jnlp -secret @secret-file -workDir "/opt/jenkins"
    ...
    INFO: Remoting server accepts the following protocols: [JNLP4-connect, Ping]
    Apr 01, 2020 7:03:51 PM hudson.remoting.jnlp.Main$CuiListener status
@@ -775,6 +852,14 @@ git push -u origin --tags
    INFO: Remote identity confirmed: e4:46:3a:de:86:24:8e:15:09:13:3d:a7:4e:07:04:37
    Apr 01, 2020 7:04:03 PM hudson.remoting.jnlp.Main$CuiListener status
    INFO: Connected
+   
+   -----------------------------
+   [root@k8s-master jenkins]# kubectl -n jenkins get svc
+   NAME       TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)              AGE
+   gitlab     ClusterIP   10.99.113.206    <none>        80/TCP               8h
+   jenkins    ClusterIP   10.111.25.1      <none>        8080/TCP,50000/TCP   13h  #这个地址的50000端口
+   postgres   ClusterIP   10.110.21.76     <none>        5432/TCP             9h
+   redis      ClusterIP   10.102.178.186   <none>        6379/TCP             9h
    ```
 
    若出现如下错误:
@@ -808,11 +893,12 @@ git push -u origin --tags
      ```bash
      Started by user admin
      Running as SYSTEM
-     Building remotely on 172.21.51.68 in workspace /opt/jenkins_jobs/workspace/free-demo
-     using credential gitlab-user
+     Building remotely on 10.211.55.27 in workspace /opt/jenkins/workspace/free-demo
+     The recommended git tool is: NONE
+     using credential gitlab_user
      Cloning the remote Git repository
-     Cloning repository http://gitlab.luffy.com/root/myblog.git
-      > git init /opt/jenkins_jobs/workspace/free-demo # timeout=10
+     Cloning repository http://gitlab.luffy.com/luffy/myblog.git
+      > git init /opt/jenkins/workspace/free-demo # timeout=10
       ...
      ```
 
@@ -856,13 +942,13 @@ authentication-tokens:1.3
 ...
 ```
 
-*get_plugin.sh*
+*get_plugin.sh*      #通过这个脚本获取plugins.txt
 
 > admin:123456@localhost 需要替换成Jenkins的用户名、密码及访问地址
 
 ```bash
 #!/usr/bin/env bash
-curl -sSL  "http://admin:admin@jenkins.luffy.com/pluginManager/api/xml?depth=1&xpath=/*/*/shortName|/*/*/version&wrapper=plugins" | perl -pe 's/.*?<shortName>([\w-]+).*?<version>([^<]+)()(<\/\w+>)+/\1:\2\n/g'|sed 's/ /:/' > plugins.txt
+curl -sSL  "http://admin:123@jenkins.luffy.com/pluginManager/api/xml?depth=1&xpath=/*/*/shortName|/*/*/version&wrapper=plugins" | perl -pe 's/.*?<shortName>([\w-]+).*?<version>([^<]+)()(<\/\w+>)+/\1:\2\n/g'|sed 's/ /:/' > plugins.txt
 ## 执行构建，定制jenkins容器
 $ docker build . -t 172.21.51.143:5000/jenkins:v20200414 -f Dockerfile
 $ docker push 172.21.51.143:5000/jenkins:v20200414
@@ -1069,6 +1155,42 @@ pipeline {
       }
    }
 }
+
+-------------------------------------------------自己的
+jenkins/pipelines/p1.yaml
+pipeline {
+   agent {label '10.211.55.27'}
+   environment { 
+      PROJECT = 'myblog'
+   }
+   stages {
+      stage('printenv') {
+         steps {
+            echo 'Hello World'
+            sh 'printenv'
+         }
+      }
+      stage('check') {
+         steps {
+            checkout([$class: 'GitSCM', branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'gitlab_user', url: 'http://gitlab.luffy.com/luffy/myblog.git']]])
+         }
+      }
+      stage('build-image') {
+         steps {
+            sh 'docker build . -t myblog:latest -f Dockerfile'
+         }
+      }
+      stage('send-msg') {
+         steps {
+            sh """
+            curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
+   -H 'Content-Type: application/json' \
+   -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
+      """
+         }
+      }
+   }
+}
 ```
 
 点击“立即构建”，同样的，我们可以配置触发器，使用webhook的方式接收项目的push事件，
@@ -1106,12 +1228,11 @@ Jenkins Pipeline 提供了一套可扩展的工具，用于将“简单到复杂
 - 配置pipeline任务，流水线定义为Pipeline Script from SCM
 - 执行push 代码测试
 
-Jenkinsfile:
+Jenkinsfile: 
 
-```
-jenkins/pipelines/p2.yaml
+```bash
 pipeline {
-   agent {label '172.21.51.68'}
+   agent {label '10.211.55.27'}
    environment { 
       PROJECT = 'myblog'
    }
@@ -1124,7 +1245,7 @@ pipeline {
       }
       stage('check') {
          steps {
-            checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'gitlab-user', url: 'http://gitlab.luffy.com/root/myblog.git']]])
+            checkout([$class: 'GitSCM', branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'gitlab_user', url: 'http://gitlab.luffy.com/luffy/myblog.git']]])
          }
       }
       stage('build-image') {
@@ -1135,13 +1256,9 @@ pipeline {
       stage('send-msg') {
          steps {
             sh """
-            curl 'https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e' \
+            curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
    -H 'Content-Type: application/json' \
-   -d '{"msgtype": "text", 
-        "text": {
-             "content": "我就是我, 是不一样的烟火"
-        }
-      }'
+   -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
       """
          }
       }
@@ -1149,7 +1266,22 @@ pipeline {
 }
 ```
 
-###### [演示2：优化及丰富流水线内容](http://49.7.203.222:3000/#/devops/jenkinsfile-pratice?id=演示2：优化及丰富流水线内容)
+
+
+操作记录
+
+```bash
+[root@k8s-slave1 ~]# cd myblog/
+[root@k8s-slave1 myblog]# vim Jenkinsfile
+[root@k8s-slave1 myblog]# git add .
+[root@k8s-slave1 myblog]# git commit -m "add Jenkinsfile"
+[root@k8s-slave1 myblog]# git push
+
+```
+
+
+
+######  [演示2：优化及丰富流水线内容](http://49.7.203.222:3000/#/devops/jenkinsfile-pratice?id=演示2：优化及丰富流水线内容)
 
 - 优化代码检出阶段
 
@@ -1162,9 +1294,8 @@ pipeline {
 - 配置webhook，实现myblog代码推送后，触发Jenkinsfile任务执行
 
 ```
-jenkins/pipelines/p3.yaml
 pipeline {
-    agent { label '172.21.51.68'}
+    agent { label '10.211.55.27'}
 
     stages {
         stage('printenv') {
@@ -1188,7 +1319,7 @@ pipeline {
         success { 
             echo 'Congratulations!'
             sh """
-                curl 'https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e' \
+                curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
                     -H 'Content-Type: application/json' \
                     -d '{"msgtype": "text", 
                             "text": {
@@ -1200,7 +1331,7 @@ pipeline {
         failure {
             echo 'Oh no!'
             sh """
-                curl 'https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e' \
+                curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744 ' \
                     -H 'Content-Type: application/json' \
                     -d '{"msgtype": "text", 
                             "text": {
@@ -1216,9 +1347,21 @@ pipeline {
 }
 ```
 
+操作记录
+
+```bash
+[root@k8s-slave1 myblog]# vim Jenkinsfile
+[root@k8s-slave1 myblog]# git commit -am "modify"  #只是修改了文件没有新增文件，可以不用git add
+[root@k8s-slave1 myblog]# git push
+```
+
+
+
+
+
 ###### [演示3：使用k8s部署服务](http://49.7.203.222:3000/#/devops/jenkinsfile-pratice?id=演示3：使用k8s部署服务)
 
-- 新建mainfests目录，将k8s所需的文件放到mainfests目录中
+- 新建manifests目录，将k8s所需的文件放到manifests目录中
 
 - 将镜像地址改成模板，在pipeline中使用新构建的镜像进行替换
 
@@ -1226,15 +1369,19 @@ pipeline {
 
   ```bash
   $ scp -r k8s-master:/root/.kube /root
+  ------
+  # 给jenkins构建服务器授权kubectl 创建项目
+  [root@k8s-slave2 ~]# mkdir .kube
+  # 将master上的授权文件复制到slave2上
+  [root@k8s-master jenkins]# scp ~/.kube/config root@10.211.55.27:/root/.kube/
   ```
 
 ```
-jenkins/pipelines/p4.yaml
 pipeline {
-    agent { label '172.21.51.68'}
+    agent { label '10.211.55.27'}
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/myblog"
     }
 
     stages {
@@ -1272,7 +1419,7 @@ pipeline {
         success { 
             echo 'Congratulations!'
             sh """
-                curl 'https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e' \
+                curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
                     -H 'Content-Type: application/json' \
                     -d '{"msgtype": "text", 
                             "text": {
@@ -1284,7 +1431,7 @@ pipeline {
         failure {
             echo 'Oh no!'
             sh """
-                curl 'https://oapi.dingtalk.com/robot/send?access_token=4778abd23dbdbaf66fc6f413e6ab9c0103a039b0054201344a22a5692cdcc54e' \
+                curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
                     -H 'Content-Type: application/json' \
                     -d '{"msgtype": "text", 
                             "text": {
@@ -1300,6 +1447,211 @@ pipeline {
 }
 ```
 
+
+
+```bash
+# 在项目目录下 manifests/
+[root@k8s-slave1 myblog]# cat manifests/myblog_all.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: myblog
+  namespace: luffy
+type: Opaque
+data:
+  MYSQL_USER: cm9vdA==
+  MYSQL_PASSWD: MTIzNDU2
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: myblog
+  namespace: luffy
+data:
+  MYSQL_HOST: "mysql"
+  MYSQL_PORT: "3306"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: luffy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      volumes:
+      - name: mysql-data
+        hostPath:
+          path: /opt/mysql/data
+      nodeSelector:
+        component: mysql
+      containers:
+      - name: mysql
+        image: mysql:5.7
+        args:
+        - --character-set-server=utf8mb4
+        - --collation-server=utf8mb4_unicode_ci
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: myblog
+              key: MYSQL_PASSWD
+        - name: MYSQL_DATABASE
+          value: "myblog"
+        resources:
+          requests:
+            memory: 100Mi
+            cpu: 50m
+          limits:
+            memory: 500Mi
+            cpu: 100m
+        readinessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 3306
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        volumeMounts:
+        - name: mysql-data
+          mountPath: /var/lib/mysql
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myblog
+  namespace: luffy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myblog
+  template:
+    metadata:
+      labels:
+        app: myblog
+    spec:
+      containers:
+      - name: myblog
+        image: {{IMAGE_URL}}
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MYSQL_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: myblog
+              key: MYSQL_HOST
+        - name: MYSQL_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: myblog
+              key: MYSQL_PORT
+        - name: MYSQL_USER
+          valueFrom:
+            secretKeyRef:
+              name: myblog
+              key: MYSQL_USER
+        - name: MYSQL_PASSWD
+          valueFrom:
+            secretKeyRef:
+              name: myblog
+              key: MYSQL_PASSWD
+        ports:
+        - containerPort: 8002
+        resources:
+          requests:
+            memory: 100Mi
+            cpu: 50m
+          limits:
+            memory: 500Mi
+            cpu: 100m
+        livenessProbe:
+          httpGet:
+            path: /blog/index/
+            port: 8002
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 2
+        readinessProbe:
+          httpGet:
+            path: /blog/index/
+            port: 8002
+            scheme: HTTP
+          initialDelaySeconds: 10
+          timeoutSeconds: 2
+          periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: myblog
+  namespace: luffy
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 8002
+  selector:
+    app: myblog
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: luffy
+spec:
+  ports:
+  - port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: mysql
+  type: ClusterIP
+
+-------第一次运行要做数据迁移
+[root@k8s-master deployment]# kubectl -n luffy exec -ti myblog-86d49c54b7-flgqs -- bash
+[root@myblog-86d49c54b7-flgqs myblog]# python3 manage.py migrate
+```
+
+
+
+
+
+```bash
+
+# 修改代码提交
+[root@k8s-slave1 ~]# cd myblog/
+[root@k8s-slave1 myblog]# vim Jenkinsfile
+[root@k8s-slave1 myblog]# mkdir manifests
+[root@k8s-slave1 myblog]# vim manifests/myblog.dpl.yaml
+[root@k8s-slave1 myblog]# cat -A  manifests/myblog.dpl.yaml
+[root@k8s-slave1 myblog]# git status
+[root@k8s-slave1 myblog]# git add .
+[root@k8s-slave1 myblog]# git commit -m "k8s-deploy"
+[root@k8s-slave1 myblog]# git push
+
+
+```
+
+
+
+
+
 ###### [演示4：使用凭据管理敏感信息](http://49.7.203.222:3000/#/devops/jenkinsfile-pratice?id=演示4：使用凭据管理敏感信息)
 
 上述Jenkinsfile中存在的问题是敏感信息使用明文，暴漏在代码中，如何管理流水线中的敏感信息（包含账号密码），之前我们在对接gitlab的时候，需要账号密码，已经使用过凭据来管理这类敏感信息，同样的，我们可以使用凭据来存储钉钉的token信息，那么，创建好凭据后，如何在Jenkinsfile中获取已有凭据的内容？
@@ -1310,12 +1662,27 @@ Jenkins 的声明式流水线语法有一个 `credentials()` 辅助方法（在[
 
 在该示例中，带密码的用户名凭据被分配了环境变量，用来使你的组织或团队以一个公用账户访问 Bitbucket 仓库；这些凭据已在 Jenkins 中配置了凭据 ID `jenkins-bitbucket-common-creds`。
 
+**jenkins配置位置**。  http://jenkins.luffy.com/credentials/store/system/domain/_/newCredentials
+
+Dashboard -》 凭据  -》系统 -》 全局凭据 (unrestricted) –>新增凭据 
+
+类型： Username with password
+
+​		 范围： 全局
+
+​        用户名： dingTalk
+
+​        密码： 钉钉群的机器人token
+
+​        id： dingTalk
+
 当在 [`environment`](https://jenkins.io/zh/doc/book/pipeline/jenkinsfile/#../syntax#environment) 指令中设置凭据环境变量时：
 
 ```
 environment {
     BITBUCKET_COMMON_CREDS = credentials('jenkins-bitbucket-common-creds')
 }
+
 ```
 
 这实际设置了下面的三个环境变量：
@@ -1357,10 +1724,10 @@ pipeline {
 ```
 jenkins/pipelines/p5.yaml
 pipeline {
-    agent { label '172.21.51.68'}
+    agent { label '10.211.55.27'}
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/myblog"
         DINGTALK_CREDS = credentials('dingTalk')
     }
 
