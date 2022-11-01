@@ -167,7 +167,7 @@ spec:
           mountPath: /var/jenkins_home
         env:
         - name: JAVA_OPTS
-          value: "-Xms4096m -Xmx5120m -Duser.timezone=Asia/Shanghai -Dhudson.model.DirectoryBrowserSupport.CSP="
+          value: "-Xms512m -Xmx1024m -XX:PermSize=256M -Duser.timezone=Asia/Shanghai -Dhudson.model.DirectoryBrowserSupport.CSP="
       volumes:
       - name: jenkinshome
         persistentVolumeClaim:
@@ -209,9 +209,13 @@ spec:
               number: 8080
 EOF
 
-# 实验环境 java虚拟机内存给小点（笔记本内存16G）虚拟机总是OOM ***坑
- value: "-Xms512m -Xmx1024m -Duser.timezone=Asia/Shanghai -Dhudson.model.DirectoryBrowserSupport.CSP="
-
+# 实验环境 java虚拟机内存给小点， jenkins总是崩溃 增加-XX:PermSize=256M 参数
+ value: "-Xms512m -Xmx1024m -XX:PermSize=256M -Duser.timezone=Asia/Shanghai -Dhudson.model.DirectoryBrowserSupport.CSP="
+注意：这里的几个 JVM 参数含义如下：
+-Xms: 使用的最小堆内存大小
+-Xmx: 使用的最大堆内存大小
+-XX：内存的永久保存区域大小
+这几个参数也不是配置越大越好，具体要根据所在机器实际内存和使用大小配置。
 ```
 
 创建服务：
@@ -418,7 +422,7 @@ spec:
             cpu: 1000m
             memory: 2048Mi
           requests:
-            cpu: 50m
+            cpu: 200m
             memory: 100Mi
         volumeMounts:
         - mountPath: /var/lib/postgresql/data
@@ -428,6 +432,14 @@ spec:
         persistentVolumeClaim:
           claimName: postgredb
 EOF
+# 实验环境资源调整
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 100Mi
    
    #创建postgres
    $ kubectl create -f postgres.yaml
@@ -492,6 +504,15 @@ EOF
                cpu: 50m
                memory: 100Mi
    EOF
+   # 实验环境资源调整
+           resources:
+             limits:
+               cpu: 200m
+               memory: 256Mi
+             requests:
+               cpu: 50m
+               memory: 50Mi
+   
    # 创建
    $ kubectl create -f redis.yaml
    ```
@@ -623,9 +644,9 @@ spec:
         resources:
           limits:
             cpu: 2000m
-            memory: 5048Mi
+            memory: 2048Mi
           requests:
-            cpu: 100m
+            cpu: 800m
             memory: 500Mi
         volumeMounts:
         - mountPath: /home/git/data
@@ -637,6 +658,21 @@ spec:
 EOF
 
 # 实验环境可以适当给小资源
+   			resources:
+          limits:
+            cpu: 1000m
+            memory: 2048Mi  #这里要给2G 不然网页反应慢
+          requests:
+            cpu: 800m
+            memory: 500Mi
+
+# 添加指定节点
+    spec: #定位
+      nodeSelector:   # 使用节点选择器将Pod调度到指定label的节点
+        component: gitlab
+## 为节点打标签   在master上执行就可以
+$ kubectl label node k8s-slave2 component=gitlab
+--------------------
 # 创建
 $ kubectl create -f gitlab.yaml 
 # kubectl -n jenkins get po
@@ -701,9 +737,13 @@ EOF
 - 试验发送消息
 
   ```bash
-  curl 'https://oapi.dingtalk.com/robot/send?access_token=740b792c8b2a02d4ead9826263b562c36e8e30d9d15bc5b9de1712fa7d469744' \
+  curl 'https://oapi.dingtalk.com/robot/send?access_token=3aa2d8eb89197163554b33e3efe9af77e0f427b94b66bd6c5c1ec60dbaca1cd6' \
      -H 'Content-Type: application/json' \
      -d '{"msgtype": "text","text": {"content": "我就是我, 是不一样的烟火"}}'
+     
+     
+  #钉钉群 设置 --》 智能群助手 -》机器人管理---》 自定义
+  https://oapi.dingtalk.com/robot/send?access_token=3aa2d8eb89197163554b33e3efe9af77e0f427b94b66bd6c5c1ec60dbaca1cd6
   ```
 
 ###### [演示过程](http://49.7.203.222:3000/#/devops/basic-usage?id=演示过程)
@@ -1822,14 +1862,58 @@ pipeline {
 ```bash
 $ git checkout -b develop
 $ git push --set-upstream origin develop
+
+# 新增标签 push到仓库
+[root@k8s-slave1 myblog]# git checkout master
+[root@k8s-slave1 myblog]# git branch
+[root@k8s-slave1 myblog]# git tag v1.0
+[root@k8s-slave1 myblog]# git push origin v1.0
 ```
 
+git tag 相关操作
+
+```bash
+#查看本地所有tag
+git tag 	
+git tag -l  
+#查看远程所有tag
+git ls-remote --tags origin
+
+#两种打标签方式
+git tag [tagname]
+git tag [tagname] -light
+git tag -a [tagname] -m "注释"  #a是annotated的缩写，指定标签类型，后附标签。 m制定标签说明
+
+# 切换标签
+git checkout [tagname] #切换标签
+git show [tagname]  #查看标签版本信息
+
+#本地删除
+git tag -d [tagname]
+#远程仓库删除,注意这里的空格
+git push origin :[tagname]
+
+# 标签发布
+git push origin [tagname]  #将tagname标签提交到服务器
+git push origin -tags #将本地标签一次性提交到服务器
+```
+
+
+
 1. 禁用pipeline项目
-2. Jenkins端创建多分支流水线项目
+
+2. Jenkins端创建多分支流水线项目   name:multi-branch-myblog
    - 增加git分支源
-   - 发现标签
-   - 根据名称过滤，develop|master|v.*
-   - 高级克隆，设置浅克隆
+
+   - 行为：发现分支 发现标签
+
+   - 根据名称过滤（支持正则表达式），develop|master|v.* //符合正则匹配的才会被构建成任务
+
+   - 高级克隆，设置浅克隆 设置3
+
+   - 扫描 多分支流水线 触发器。时间间隔 1minute
+
+     
 
 保存后，会自动检索项目中所有存在Jenkinsfile文件的分支和标签，若匹配我们设置的过滤正则表达式，则会添加到多分支的构建视图中。所有添加到视图中的分支和标签，会默认执行一次构建任务。
 
@@ -1841,10 +1925,10 @@ $ git push --set-upstream origin develop
 ```
 jenkins/pipelines/p6.yaml
 pipeline {
-    agent { label '172.21.51.68'}
+    agent { label '10.211.55.27'}
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/myblog"
         DINGTALK_CREDS = credentials('dingTalk')
         TAB_STR = "\n                    \n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
     }
@@ -1931,6 +2015,8 @@ pipeline {
 }
 ```
 
+
+
 ###### [演示3：通知gitlab构建状态](http://49.7.203.222:3000/#/devops/multi-branch-pipeline?id=演示3：通知gitlab构建状态)
 
 Jenkins端做了构建，可以通过gitlab通过的api将构建状态通知过去，作为开发人员发起Merge Request或者合并Merge Request的依据之一。
@@ -1940,7 +2026,7 @@ Jenkins端做了构建，可以通过gitlab通过的api将构建状态通知过�
 ```
 jenkins/pipelines/p7.yaml
 pipeline {
-    agent { label '172.21.51.68'}
+    agent { label '10.211.55.27'}
     
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
@@ -1950,7 +2036,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/demo/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/demo/myblog"
         DINGTALK_CREDS = credentials('dingTalk')
         TAB_STR = "\n                    \n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
     }
@@ -2039,6 +2125,16 @@ pipeline {
         }
     }
 }
+
+-------------说明
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))  # 保留最新的10条构建记录
+        disableConcurrentBuilds()           # 不允许并行构建， 要排队构建
+        timeout(time: 20, unit: 'MINUTES')  # 20分钟没构建完就中断
+        gitLabConnection('gitlab')          # 连接gitlab； name是在系统设置里配置的gitlab
+    }
+    
+ updateGitlabCommitStatus(name: env.STAGE_NAME, state: 'success') #将流水线节点的状态发给gitlab
 ```
 
 我们可以访问gitlab，然后找到commit记录，查看同步状态
@@ -2092,6 +2188,7 @@ pipeline {
    - 连接测试，成功会提示：Connection test successful
    - Jenkins地址：[http://jenkins:8080](http://jenkins:8080/)
    - Jenkins 通道 ：jenkins:50000
+   - 连接 Kubernetes API 的最大连接数 300  ；容器数量：100；
 
 4. 配置Pod Template
 
@@ -2103,21 +2200,29 @@ pipeline {
 
    - 连接 Jenkins 的超时时间（秒） ：300，设置连接jenkins超时时间
 
-   - 工作空间卷：选择hostpath，设置/opt/jenkins,注意需要设置目录权限，否则Pod没有权限 ![img](7基于Kubernetes的DevOps平台实践.assets/workspace-volume.png)
+   - 工作空间卷：选择hostpath，设置 主机路径：/opt/jenkins  挂载路径： /home/jenkins/agent
 
+     注意需要设置目录权限，否则Pod没有权限 ![img](7基于Kubernetes的DevOps平台实践.assets/workspace-volume.png)
+     
      ```bash
+     # k8s-slave2 机器
      $ chown -R 1000:1000 /opt/jenkins
      $ chmod 777 /opt/jenkins
      ```
+     
+   - 节点选择器 ：  agent=true
+   
 
 ###### [演示动态slave pod](http://49.7.203.222:3000/#/devops/jenkins-with-k8s?id=演示动态slave-pod)
 
 ```bash
 # 为准备运行jnlp-slave-agent的pod的节点打上label
-$ kubectl label node k8s-slave1 agent=true
+$ kubectl label node k8s-slave2 agent=true
 
-### 回放一次多分支流水线develop分支
-agent { label 'jnlp-slave'}
+### 回放一次多分支流水线develop分支 //浏览器浏览 http://jenkins.luffy.com/job/multi-branch-myblog/job/master/4/replay/
+agent { label 'jnlp-slave'}   //修改代码 label 
+
+
 ```
 
 执行任务，会下载默认的jnlp-slave镜像，地址为jenkins/inbound-agent:4.11-1-jdk11，我们可以先在k8s-master节点拉取下来该镜像：
@@ -2135,7 +2240,7 @@ $ docker pull jenkins/inbound-agent:4.11-1-jdk11
 - 目前是用的jnlp的容器，是java的环境，我们在此基础上需要集成很多工具，能不能创建一个新的容器，让新容器来做具体的任务，jnlp-slave容器只用来负责连接jenkins-master
 - 针对不同的构建环境（java、python、go、nodejs），可以制作不同的容器，来执行对应的任务
 
-> 
+
 
 ###### [Pod-Template中容器镜像的制作](http://49.7.203.222:3000/#/devops/jenkins-with-k8s?id=pod-template中容器镜像的制作)
 
@@ -2154,12 +2259,23 @@ $ mkdir tools;
 $ cd tools;
 $ cp `which kubectl` .
 $ cp ~/.kube/config .
+
+------
+[root@k8s-master jenkins]# mkdir tools
+[root@k8s-master jenkins]# cd tools
+[root@k8s-master tools]# cp `which kubectl` .
+[root@k8s-master tools]# cp ~/.kube/config .
 ```
 
 *Dockerfile*
 
+`jenkins/custom-images/tools/Dockerfile`
+
+> # usermod -a -G docker root #表示把docker用户添加到root用户组里
+>
+>  openjdk8 后面可以改opendjk11
+
 ```
-jenkins/custom-images/tools/Dockerfile
 FROM alpine:3.13.4
 LABEL maintainer="inspur_lyx@hotmail.com"
 USER root
@@ -2184,27 +2300,47 @@ RUN chmod +x /usr/local/bin/kubectl
 执行镜像构建并推送到仓库中：
 
 ```bash
-$ docker build . -t 172.21.51.143:5000/devops/tools:v1
-$ docker push 172.21.51.143:5000/devops/tools:v1
+$ docker build . -t 10.211.55.27:5000/devops/tools:v1
+$ docker push 10.211.55.27:5000/devops/tools:v1
 ```
 
 我们可以直接使用该镜像做测试：
 
 ```bash
 ## 启动临时镜像做测试
-$ docker run --rm -ti 172.21.51.143:5000/devops/tools:v1 bash
+$ docker run --rm -ti 10.211.55.27:5000/devops/tools:v1 bash
 # / git clone http://xxxxxx.git
 # / kubectl get no
 # / python3
 #/ docker
 
 ## 重新挂载docker的sock文件
-docker run -v /var/run/docker.sock:/var/run/docker.sock --rm -ti 172.21.51.143:5000/devops/tools:v1 bash
+docker run -v /var/run/docker.sock:/var/run/docker.sock --rm -ti 10.211.55.27:5000/devops/tools:v1 bash
 ```
 
 ###### [实践通过Jenkinsfile实现demo项目自动发布到kubenetes环境](http://49.7.203.222:3000/#/devops/jenkins-with-k8s?id=实践通过jenkinsfile实现demo项目自动发布到kubenetes环境)
 
 更新Jenkins中的PodTemplate，添加tools镜像，注意同时要先添加名为jnlp的container，因为我们是使用自定义的PodTemplate覆盖掉默认的模板：
+
+[配置集群]http://jenkins.luffy.com/configureClouds/  添加两个容器。 一个默认的jnlp
+
+> 名称： tools
+>
+> Docker 镜像： 10.211.55.27:5000/devops/tools:v1
+>
+> 
+>
+> 名称：jnlp
+>
+> Docker 镜像：  jenkins/inbound-agent:4.11-1-jdk11
+>
+> 清空运行的命令 和运行参数
+>
+> 添加卷：Host Path Volume
+>
+> ​				主机路径：/var/run/docker.sock
+>
+> ​				挂载路径： /var/run/docker.sock
 
 ![img](7基于Kubernetes的DevOps平台实践.assets/pod-template-jnlp.png)
 
@@ -2214,8 +2350,9 @@ docker run -v /var/run/docker.sock:/var/run/docker.sock --rm -ti 172.21.51.143:5
 
 tools容器做好后，我们需要对Jenkinsfile做如下调整：
 
+`jenkins/pipelines/p8.yaml`
+
 ```
-jenkins/pipelines/p8.yaml
 pipeline {
     agent { label 'jnlp-slave'}
     
@@ -2227,7 +2364,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/myblog"
         DINGTALK_CREDS = credentials('dingTalk')
         TAB_STR = "\n                    \n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
     }
@@ -2357,6 +2494,30 @@ Sonar可以从以下七个维度检测代码质量，而作为开发人员至少
 3. 执行完后，将分析报告被发送到SonarQube服务器进行处理
 4. SonarQube服务器处理和存储分析报告导致SonarQube数据库，并显示结果在UI中
 
+备注：
+
+```text
+http://sonar.luffy.com/projects  #项目页面介绍
+Bugs：            # bug数量
+Vulnerabilities   # 稳定性指标
+Code Smells       # 代码的坏味道  代码写的不规范的地方
+Coverage          # 单元测试的覆盖率
+Duplications      # 代码重复率
+
+http://sonar.luffy.com/quality_gates/show/1  # 质量门配置
+# create。创建一个质量门
+# Add Condition  添加条件 关联项目
+    Metric 选 Coverage。单元测试覆盖率
+      Operator           Error
+      is less than        80      #表示单元测试覆盖率少于80% 就不通过
+
+
+```
+
+
+
+
+
 ###### [sonarqube on kubernetes环境搭建](http://49.7.203.222:3000/#/devops/jenkins-with-sonarqube?id=sonarqube-on-kubernetes环境搭建)
 
 1. 资源文件准备
@@ -2466,25 +2627,44 @@ spec:
       - path: /
         pathType: Prefix
         backend:
-          service: 
+          service:
             name: sonarqube
             port:
               number: 9000
+              
+---------------------参数说明
+        securityContext:
+          privileged: true    #特权模式启动 可以修改系统参数
+# 实验环境做的资源调整
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 2256Mi
+          requests:
+            cpu: 2000m
+            memory: 2024Mi
+            
+# 添加指定节点
+    spec: #定位
+      nodeSelector:   # 使用节点选择器将Pod调度到指定label的节点
+        scan: sonarqube
+## 为节点打标签   在master上执行就可以
+$ kubectl label node k8s-slave1 scan=sonarqube
 ```
 
 1. sonarqube服务端安装
 
    ```bash
    # 创建sonar数据库
-   $ kubectl -n jenkins exec -ti postgres-5859dc6f58-mgqz9 bash
-   #/ psql 
-   # create database sonar;
+   $ kubectl -n jenkins exec -ti postgres-5ddb877f66-qqs8t -- bash
+   /# psql 
+   root=# create database sonar;
    
    ## 创建sonarqube服务器
    $ kubectl create -f sonar.yaml
    
    ## 配置本地hosts解析
-   172.21.51.143 sonar.luffy.com
+   10.211.55.25 wordpress.luffy.com harbor.luffy.com kibana.luffy.com prometheus.luffy.com grafana.luffy.com alertmanager.luffy.com jenkins.luffy.com gitlab.luffy.com sonar.luffy.com
    
    ## 访问sonarqube，初始用户名密码为 admin/admin
    $ curl http://sonar.luffy.com
@@ -2494,56 +2674,72 @@ spec:
 
    下载地址： https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.2.0.1873-linux.zip。该地址比较慢，可以在网盘下载（https://pan.baidu.com/s/1SiEhWyHikTiKl5lEMX1tJg 提取码: tqb9）。
 
+   ```bash
+   [root@k8s-master python-demo]# cd ~/jenkins/sonar/
+   [root@k8s-master sonar]# wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.2.0.1873-linux.zip
+   [root@k8s-master sonar]# unzip sonar-scanner-cli-4.2.0.1873-linux.zip
+   ```
+
+   
+
 3. 演示sonar代码扫描功能
 
    - 在项目根目录中准备配置文件 **sonar-project.properties**
 
      ```bash
+     [root@k8s-master sonar]# cd ~/python-demo/
+     [root@k8s-master python-demo]# ls
+     blog  Dockerfile  log  manage.py  myblog  myblog.conf  requirements.txt  resources  run.sh  static  uwsgi.ini
+     [root@k8s-master python-demo]# vi sonar-project.properties
+     [root@k8s-master python-demo]# cat sonar-project.properties
      sonar.projectKey=myblog
      sonar.projectName=myblog
      # if you want disabled the DTD verification for a proxy problem for example, true by default
      sonar.coverage.dtdVerification=false
-     # JUnit like test report, default value is test.xml
+     # JUnit like test report, default value is test.xml  #执行代码扫描的目录位置
      sonar.sources=blog,myblog
      ```
-
+   
    - 配置sonarqube服务器地址
-
+   
      由于sonar-scanner需要将扫描结果上报给sonarqube服务器做质量分析，因此我们需要在sonar-scanner中配置sonarqube的服务器地址：
-
+   
      在集群宿主机中测试，先配置一下hosts文件，然后配置sonar的地址：
-
+   
      ```bash
-     $ cat /etc/hosts
-     172.21.51.143  sonar.luffy.com
+     [root@k8s-master python-demo]# cat /etc/hosts
+     10.211.55.25 gitlab.luffy.com jenkins.luffy.com sonar.luffy.com
      
-     $ cat sonar-scanner/conf/sonar-scanner.properties
+     # vi /root/sonar/sonar-scanner-4.2.0.1873-linux/conf/sonar-scanner.properties
      #----- Default SonarQube server
      #sonar.host.url=http://localhost:9000
      sonar.host.url=http://sonar.luffy.com
+     
      #----- Default source code encoding
      #sonar.sourceEncoding=UTF-8
      ```
-
+   
    ```bash
    # 为了使所有的pod都可以通过`sonar.luffy.com`访问，可以配置coredns的静态解析
    $ kubectl -n kube-system edit cm coredns 
    ...
              hosts {
-                 172.21.51.143 jenkins.luffy.com gitlab.luffy.com sonar.luffy.com
+                 10.211.55.25 jenkins.luffy.com gitlab.luffy.com sonar.luffy.com
                  fallthrough
           }
    ```
-
+   
    - 执行扫描
-
+   
      ```bash
      ## 在项目的根目录下执行
      $ /opt/sonar-scanner-4.2.0.1873-linux/bin/sonar-scanner  -X 
+     
+     [root@k8s-master python-demo]# /root/jenkins/sonar/sonar-scanner-4.2.0.1873-linux/bin/sonar-scanner -X
      ```
-
+   
    - sonarqube界面查看结果
-
+   
      登录sonarqube界面查看结果，Quality Gates说明
 
 java项目的配置文件通常格式为：
@@ -2553,10 +2749,10 @@ sonar.projectKey=eureka-cluster
 sonar.projectName=eureka-cluster
 # if you want disabled the DTD verification for a proxy problem for example, true by default
 # JUnit like test report, default value is test.xml
-sonar.sources=src/main/java
+sonar.sources=src/main/java    #源代码目录
 sonar.language=java
-sonar.tests=src/test/java
-sonar.java.binaries=target/classes
+sonar.tests=src/test/java      #单元测试文件目录
+sonar.java.binaries=target/classes   # java编译完的class文件目录
 ```
 
 ###### [插件安装及配置](http://49.7.203.222:3000/#/devops/jenkins-with-sonarqube?id=插件安装及配置)
@@ -2576,7 +2772,7 @@ sonar.java.binaries=target/classes
        `use_embedded_jre=false`
 
    ```bash
-   $ cd tools
+   $ cd /root/jenkins/tools
    $ cp -r /opt/sonar-scanner-4.2.0.1873-linux/ sonar-scanner
    ## sonar配置，由于我们是在Pod中使用，也可以直接配置：sonar.host.url=http://sonarqube:9000
    $ cat sonar-scanner/conf/sonar-scanner.properties
@@ -2587,12 +2783,10 @@ sonar.java.binaries=target/classes
    #sonar.sourceEncoding=UTF-8
    
    $ rm -rf sonar-scanner/jre
-   $ vi sonar-scanner/bin/sonar-scanner
-   ...
-   use_embedded_jre=false
-   ...
+   $ sed -i "s/use_embedded_jre=true/use_embedded_jre=false/g" sonar-scanner/bin/sonar-scanner
+   
    ```
-
+   
    *Dockerfile*
 
    `jenkins/custom-images/tools/Dockerfile2`
@@ -2630,14 +2824,40 @@ sonar.java.binaries=target/classes
 重新构建镜像，并推送到仓库：
 
 ```bash
-   $ docker build . -t 172.21.51.143:5000/devops/tools:v2
-   $ docker push 172.21.51.143:5000/devops/tools:v2
+$ docker build . -t 10.211.55.27:5000/devops/tools:v2 -f Dockerfile2
+$ docker push 10.211.55.27:5000/devops/tools:v2
    
+   
+## 启动临时镜像做测试
+docker run -v /var/run/docker.sock:/var/run/docker.sock --rm -ti 10.211.55.27:5000/devops/tools:v2 bash
+# / git clone http://xxxxxx.git
+# / kubectl get no
+# / python3
+#/ docker
+   
+# 批量删除指定镜像的所有版本
+docker images |grep "10.211.55.27:5000/myblog" |awk '{print $1":"$2}'|xargs docker rmi
+# 删除所有none 镜像
+docker images |grep "none"|awk '{print $3}' |xargs docker rmi -f
+# register仓库删除镜像
+[root@k8s-slave2 ~]# docker exec -it 70271ee6ac0d /bin/sh
+/ # rm -rf /var/lib/registry/docker/registry/v2/repositories/myblog  #myblog镜像名
+# 简变操作  # docker exec 镜像仓库名 rm -rf /var/lib/registry/docker/registry/v2/repositories/删除的镜像名
+# 上一步操作只是删除了目录，使用registry gc清除blobs
+docker exec registry（容器名） bin/registry garbage-collect /etc/docker/registry/config.yml
+# 或者进入容器操作
+docker exec -it docker-registry /bin/sh
+cd /var/lib/registry/
+du -sch
+registry garbage-collect /etc/docker/registry/config.yml
+du -sch
 ```
 
 1. 修改Jenkins PodTemplate
 
    为了在新的构建任务中可以拉取v2版本的tools镜像，需要更新PodTemplate
+
+   http://jenkins.luffy.com/configureClouds/ 配置pod templates  镜像地址修改 v2
 
 2. 安装并配置sonar插件
 
@@ -2645,7 +2865,7 @@ sonar.java.binaries=target/classes
 
    - 安装插件
 
-     插件中心搜索sonarqube，直接安装
+     插件中心搜索sonarqube，直接安装. SonarQube Scanner
 
    - 配置插件
 
@@ -2655,20 +2875,25 @@ sonar.java.binaries=target/classes
 
      - Server URL：[http://sonar.luffy.com](http://sonar.luffy.com/)
 
-     - Server authentication token
+     - Server authentication token      #这里暂时先保存一下。等全局凭证添加好后再来选择
 
        ① 登录sonarqube -> My Account -> Security -> Generate Token
 
+       ​	http://sonar.luffy.com/account/security/   name：jenkins  复制Secret
+       
        ② 登录Jenkins，添加全局凭据，类型为Secret text
-
+       
+       ​				Secret：粘贴     id：sonarqube
+   
    - 如何在jenkinsfile中使用
-
+   
      我们在 https://jenkins.io/doc/pipeline/steps/sonar/ 官方介绍中可以看到：
 
 ###### [Jenkinsfile集成sonarqube演示](http://49.7.203.222:3000/#/devops/jenkins-with-sonarqube?id=jenkinsfile集成sonarqube演示)
 
+`jenkins/pipelines/p9.yaml`
+
 ```
-jenkins/pipelines/p9.yaml
 pipeline {
     agent { label 'jnlp-slave'}
     
@@ -2680,7 +2905,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/myblog"
         DINGTALK_CREDS = credentials('dingTalk')
         TAB_STR = "\n                    \n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
     }
@@ -2810,13 +3035,25 @@ pipeline {
         }
     }
 }
+
+---------参数说明
+parallel{  
+	这里的任务是并行执行的
+}
+container('tools'){} #指的是这里面任务使用tools容器里运行
+withSonarQubeEnv('sonarqube') #是jenkins系统设置里面 做的与sonarqube的连接的name
+			waitForQualityGate('sonarqube') #拿到sonar扫描结果
 ```
 
 若Jenkins执行任务过程中sonarqube端报类似下图的错： ![img](7基于Kubernetes的DevOps平台实践.assets/sonar-scanner-err.png)
 
 则需要在sonarqube服务端进行如下配置，添加一个webhook： ![img](7基于Kubernetes的DevOps平台实践.assets/fix-sonar-scanner-pending-err.png)
 
+操作记录 http://sonar.luffy.com/admin/webhooks    ==>carete 
 
+Name  : jenkins
+
+Url:  http://jenkins:8080/sonarqube-webhook/
 
 
 
@@ -2829,7 +3066,7 @@ pipeline {
 ###### [robot用例简介](http://49.7.203.222:3000/#/devops/jenkins-with-robotframework?id=robot用例简介)
 
 ```
-robot/robot.txt
+$ cat robot.txt   #后面放在项目的根目录里
 *** Settings ***
 Library           RequestsLibrary
 Library           SeleniumLibrary
@@ -2857,10 +3094,12 @@ ui
     Capture Page Screenshot
     Page Should Contain    Django
     close browser
+    
 # 使用tools镜像启动容器，来验证手动使用robotframework来做验收测试
-$ docker run --rm -ti 172.21.51.143:5000/devops/tools:v2 bash
+$ docker run --rm -ti 10.211.55.27:5000/devops/tools:v2 bash
 bash-5.0# apk add chromium chromium-chromedriver
-$ cat requirements.txt
+
+[root@k8s-master tools]# cat requirements.txt  # tools工具镜像的准备文件
 robotframework
 robotframework-seleniumlibrary
 robotframework-databaselibrary
@@ -2869,11 +3108,13 @@ robotframework-requests
 #pip安装必要的软件包
 $ python3 -m pip install --upgrade pip && pip3 install -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r requirements.txt 
 
-#使用robot命令做测试
+#使用robot命令做测试    artifacts/是测试结果存放目录
 $ robot -d artifacts/ robot.txt
 ```
 
 ###### [与tools工具镜像集成](http://49.7.203.222:3000/#/devops/jenkins-with-robotframework?id=与tools工具镜像集成)
+
+`/root/jenkins/tools/Dockerfile`    替换原文件内容
 
 ```powershell
 FROM alpine:3.13.4
@@ -2909,12 +3150,15 @@ COPY sonar-scanner /usr/lib/sonar-scanner
 RUN ln -s /usr/lib/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner && chmod +x /usr/local/bin/sonar-scanner
 ENV SONAR_RUNNER_HOME=/usr/lib/sonar-scanner
 # ------------------------------------------------#
-$ docker build . -t 172.21.51.143:5000/devops/tools:v3
-
-$ docker push 172.21.51.143:5000/devops/tools:v3
 ```
 
-更新Jenkins中kubernetes中的containers template
+```bash
+$ docker build . -t 10.211.55.27:5000/devops/tools:v3
+
+$ docker push 10.211.55.27:5000/devops/tools:v3
+```
+
+更新Jenkins中kubernetes中的containers template 为v3版本
 
 ###### [插件安装及配置](http://49.7.203.222:3000/#/devops/jenkins-with-robotframework?id=插件安装及配置)
 
@@ -2944,14 +3188,21 @@ $ docker push 172.21.51.143:5000/devops/tools:v3
            echo "R ${currentBuild.result}"
            archiveArtifacts artifacts: 'artifacts/*', fingerprint: true
        }
+   
+   ---------参数说明
+      passThreshold : 80,      #设置通过率要达到80% 才算达标
+      unstableThreshold: 20.0,
+        
+    archiveArtifacts artifacts: 'artifacts/*', fingerprint: true  #这里写的是让jenkins界面能看到结果     
    ```
 
 ###### [实践通过Jenkinsfile实现demo项目的验收测试](http://49.7.203.222:3000/#/devops/jenkins-with-robotframework?id=实践通过jenkinsfile实现demo项目的验收测试)
 
-python-demo项目添加robot.txt文件：
+python-demo项目添加robot.txt文件和Jekinsfile：
+
+`jenkins/pipelines/p10.yaml`
 
 ```
-jenkins/pipelines/p10.yaml
 pipeline {
     agent { label 'jnlp-slave'}
     
@@ -2963,7 +3214,7 @@ pipeline {
     }
 
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/myblog"
         DINGTALK_CREDS = credentials('dingTalk')
         TAB_STR = "\n                    \n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
     }
@@ -3056,7 +3307,7 @@ pipeline {
         stage('Accept Test') {
             steps {
                     container('tools') {
-                        sh 'robot -d artifacts/ robot.txt'
+                        sh 'robot -d artifacts/ robot.txt || echo ok;'
                         echo "R ${currentBuild.result}"
                         step([
                             $class : 'RobotPublisher',
@@ -3113,6 +3364,16 @@ pipeline {
     }
 }
 ```
+
+
+
+参数说明
+
+```bash
+sh "kubectl apply -f manifests/;sleep 20;"  #这里20秒是让容器更新完后 再让下一步的代码测试执行， 不然代码测试就测试的上一个版本的。
+```
+
+
 
 在Jenkins中查看robot的构建结果。
 

@@ -299,15 +299,23 @@ def sayBye() {
     echo "i am fine too , ${this.content}, Bye!"
     return this
 }
-.gitignore
+```
+`.gitignore`
+
+```
 .idea/*
 .vscode/*
 out
+```
+
+```bash
 # git记住密码
 $ git config --global credential.helper store
 ```
 
-在gitlab创建项目，把library代码推送到镜像仓库。
+在gitlab创建项目，把library代码推送到镜像仓库。 # 在luffy用户组下创建jenkins-shared-library 项目
+
+
 
 ###### [配置Jenkins](http://49.7.203.222:3000/#/jenkins-shared-library/library-within-jenkins?id=配置jenkins)
 
