@@ -1,25 +1,3 @@
-
-
-# # jenkins 构建integration test 阶段报错，与预想不一样。
-
-```bash
-# jenkins 构建integration test 阶段报错，与预想不一样。
-[Pipeline] { (Declarative: Post Actions)
-[Pipeline] script
-[Pipeline] {
-[Pipeline] sh
-+ git log --oneline -n 1   #这个阶段执行了这个代码 ，看不懂了。
-[Pipeline] readFile
-[Pipeline] withCredentials
-Masking supported pattern matches of $PASSWORD
-[Pipeline] {
-[Pipeline] httpRequest
-Warning: A secret was passed to "httpRequest" using Groovy String interpolation, which is insecure.
-		 Affected argument(s) used the following variable(s): [DINGTALK_CREDS_PSW, PASSWORD]
-		 See https://jenkins.io/redirect/groovy-string-interpolation for details.
-		 
-		 
-[root@k8s-slave1 ~]# cat myblog/Jenkinsfile    #不知道如何排查了
 @Library('luffy-devops') _
 
 pipeline {
@@ -107,12 +85,3 @@ pipeline {
         }
     }
 }
-
-```
-
-
-
-
-
-
-

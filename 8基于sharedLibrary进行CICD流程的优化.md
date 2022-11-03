@@ -73,6 +73,8 @@ Groovy及SpringBoot、SpringCloud
 
 ###### [安装java](http://49.7.203.222:3000/#/jenkins-shared-library/env?id=安装java)
 
+安装过程中可以勾选添加到环境变量
+
 安装路径：D:\software\java\jdk
 
 环境变量：
@@ -90,11 +92,46 @@ Groovy及SpringBoot、SpringCloud
 - GROOVY_PATH D:\software\groovy-3.0.2
 - PATH D:\software\groovy-3.0.2\bin
 
-###### [安装idea](http://49.7.203.222:3000/#/jenkins-shared-library/env?id=安装idea)
+###### [安装idea](http://49.7.203.222:3000/#/jenkins-shared-library/env?id=安装idea)  安装免费试用30天，到期重装又可以试用30天
 
 安装路径：D:\software\IntelliJ IDEA 2019.2.3
 
 新建项目测试
+
+
+
+操作记录
+
+```bash
+安装路径：C:\Program Files\Java\jdk1.8.0_202
+  环境变量：
+  - JAVA_HOME C:\Program Files\Java\jdk1.8.0_202
+  - CLASSPATH .;%JAVA_HOME%\lib\dt.jar;%JAVA_HOME%\lib\tools.jar;
+  - PATH %JAVA_HOME%\bin
+安装路径：C:\Program Files\groovy-3.0.2
+  环境变量：
+  - GROOVY_PATH C:\Program Files\groovy-3.0.2
+  - PATH C:\Program Files\groovy-3.0.2\bin
+安装路径：C:\Program Files\JetBrains\IntelliJ IDEA 2019.2.3
+环境变量添加位置 ： 电脑属性-》高级系统设置--》环境变量--》 系统变量
+
+验证：打开cmd
+C:\Windows\system32>java -version
+java version "1.8.0_202"
+Java(TM) SE Runtime Environment (build 1.8.0_202-b08)
+Java HotSpot(TM) 64-Bit Server VM (build 25.202-b08, mixed mode)
+
+C:\Windows\system32>groovy -version
+Groovy Version: 3.0.2 JVM: 1.8.0_202 Vendor: Oracle Corporation OS: Windows 10
+ 
+ 
+ IntelliJ IDEA 2019.2.3 打开新建项目 
+ 					选 GRoovy类型  
+ 							Project SDK:  C:\Program Files\Java\jdk1.8.0_202
+ 							Groovy library: C:\Program Files\groovy-3.0.2
+ 				project name : jenkins-shared-library
+ 				Project location: c:
+```
 
 
 
@@ -265,6 +302,8 @@ Groovy及SpringBoot、SpringCloud
 
 先来看一下如何使用shared library实现最简单的helloworld输出功能，来理清楚使用shared library的流程。
 
+新建 Groovy script   name: com.luffy.devops.Hello
+
 ###### [Hello.groovy](http://49.7.203.222:3000/#/jenkins-shared-library/library-within-jenkins?id=hellogroovy)
 
 ```groovy
@@ -308,10 +347,63 @@ def sayBye() {
 out
 ```
 
-```bash
-# git记住密码
-$ git config --global credential.helper store
+创建`vars/devops.groovy` 
+
+```groovy
+import com.luffy.devops.Hello
+
+def hello(String content) {
+    return new Hello().init(content)
+}
 ```
+
+
+
+```bash
+# git push提交时候 记住密码
+$ git config --global credential.helper store
+
+[root@k8s-slave1 ~]# tree -a jenkins-shared-library/
+jenkins-shared-library/
+├── .gitignore
+├── .idea
+├── jenkins-shared-library.iml
+├── src
+│   └── com
+│       └── luffy
+│           └── devops
+│               └── Hello.groovy
+└── vars
+    └── devops.groovy
+    
+[root@k8s-slave1 ~]# cat jenkins-shared-library/vars/devops.groovy
+import com.luffy.devops.Hello
+
+def hello(String content) {
+    return new Hello().init(content)
+}
+[root@k8s-slave1 ~]# cat jenkins-shared-library/jenkins-shared-library.iml
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="JAVA_MODULE" version="4">
+  <component name="NewModuleRootManager" inherit-compiler-output="true">
+    <exclude-output />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" name="groovy-3.0.2" level="application" />
+  </component>
+
+cd jenkins-shared-library
+git init
+git remote add origin http://gitlab.luffy.com/luffy/jenkins-shared-library.git
+git add .
+git commit -m "Initial commit"
+git push -u origin master
+```
+
+
 
 在gitlab创建项目，把library代码推送到镜像仓库。 # 在luffy用户组下创建jenkins-shared-library 项目
 
@@ -324,11 +416,15 @@ $ git config --global credential.helper store
 - Library Name：luffy-devops
 - Default Version：master
 - Source Code Management：Git
+  - Git 仓库地址 http://gitlab.luffy.com/luffy/jenkins-shared-library.git
+  - 凭据是之前的 root/\****
+
 
 ###### [Jenkinsfile中引用](http://49.7.203.222:3000/#/jenkins-shared-library/library-within-jenkins?id=jenkinsfile中引用)
 
+`jenkins/pipelines/p11.yaml` //找一个之前执行成功jenkins构建记录 回放 粘贴如下代码测试
+
 ```
-jenkins/pipelines/p11.yaml
 @Library('luffy-devops') _
 
 pipeline {
@@ -357,15 +453,7 @@ pipeline {
 }
 ```
 
-创建`vars/devops.groovy`
 
-```groovy
-import com.luffy.devops.Hello
-
-def hello(String content) {
-    return new Hello().init(content)
-}
-```
 
 
 
@@ -377,16 +465,21 @@ def hello(String content) {
 
 - docker build，docker push，docker login
 - 账户密码，jenkins凭据，（library中获取凭据内容）
-- docker login 172.21.51.143:5000
+- docker login 10.211.55.27:5000
 - try catch
 
 ###### [镜像构建逻辑实现](http://49.7.203.222:3000/#/jenkins-shared-library/func-image-build?id=镜像构建逻辑实现)
+`devops.groovy`         Jenkins-shared-library/vars/devops.groovy
 
-```
-devops.groovy
+```groovy
+import com.luffy.devops.*
+
+def hello(String content) {
+    return new Hello().init(content)
+}
 /**
  *
- * @param repo, 172.21.51.143:5000/demo/myblog/xxx/
+ * @param repo, 10.211.55.27:5000/demo/myblog/xxx/
  * @param tag, v1.0
  * @param dockerfile
  * @param credentialsId
@@ -395,9 +488,8 @@ devops.groovy
 def docker(String repo, String tag, String credentialsId, String dockerfile="Dockerfile", String context=".") {
     return new Docker().docker(repo, tag, credentialsId, dockerfile, context)
 }
-Docker.groovy
 ```
-
+`Docker.groovy`   Jenkins-shared-library/src/com/luffy/devops/Docker.groovy
 逻辑中需要注意的点：
 
 - 构建和推送镜像，需要登录仓库（需要认证）
@@ -469,7 +561,7 @@ def login() {
     if(this.isLoggedIn || credentialsId == ""){
         return this
     }
-    // docker login
+    // docker login  从jenkins 凭据里获取帐号密码
     withCredentials([usernamePassword(credentialsId: this.credentialsId, usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
         def regs = this.getRegistry()
         retry(3) {
@@ -500,6 +592,16 @@ Jenkinsfile
 
 需要先在Jenkins端创建仓库登录凭据`credential-registry`
 
+​			 创建凭据 [新增凭据 http://jenkins.luffy.com/credentials/store/system/domain/_/newCredentials
+
+​				类型：Username with password
+
+​				用户名：     密码：
+
+​				ID ：  credential-registry
+
+`Jenkinsfile`
+
 ```groovy
 @Library('luffy-devops') _
 
@@ -510,7 +612,7 @@ pipeline {
         gitLabConnection('gitlab')
     }
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/demo/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/demo/myblog"
         IMAGE_CREDENTIAL = "credential-registry"
     }
     stages {
@@ -558,7 +660,7 @@ pipeline {
 
 需要针对上述问题，做出优化
 
-1. 优化try逻辑
+1. 优化try逻辑.     Jenkins-shared-library/src/com/luffy/devops/Docker.groovy
 
    ```bash
    def build() {
@@ -585,7 +687,7 @@ pipeline {
    }
    ```
 
-2. 通知gitlab端构建任务及状态
+2. 通知gitlab端构建任务及状态.   Jenkins-shared-library/src/com/luffy/devops/Docker.groovy
 
    ```bash
    def build() {
@@ -619,7 +721,7 @@ pipeline {
 
    由于每个stage都需要构建通知任务，因此抽成公共的逻辑，为各stage调用
 
-   `BuildMessage.groovy`
+   `BuildMessage.groovy`    Jenkins-shared-library/src/com/luffy/devops/BuildMessage.groovy
 
    ```bash
    package com.luffy.devops
@@ -664,7 +766,7 @@ pipeline {
    }
    ```
 
-使用`Jenkinsfile`来验证上述修改是否正确：
+使用`Jenkinsfile`来验证上述修改是否正确：更新myblog项目里Jenkinsfile 文件
 
 ```groovy
 @Library('luffy-devops') _
@@ -676,7 +778,7 @@ pipeline {
         gitLabConnection('gitlab')
     }
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/demo/myblog"
+        IMAGE_REPO = "10.211.55.27:5000/demo/myblog"
         IMAGE_CREDENTIAL = "credential-registry"
         DINGTALK_CREDS = credentials('dingTalk')
     }
@@ -873,8 +975,23 @@ def getRegistry(){
 
 ###### [library实现部署简单版](http://49.7.203.222:3000/#/jenkins-shared-library/func-k8s-deploy?id=library实现部署简单版)
 
+`devops.groovy`   jenins-shared-library/vars/devops.groovy
+
 ```
-devops.groovy
+import com.luffy.devops.*
+
+/**
+ *
+ * @param repo, 10.211.55.27:5000/demo/myblog/xxx/
+ * @param tag, v1.0
+ * @param dockerfile
+ * @param credentialsId
+ * @param context
+ */
+def docker(String repo, String tag, String credentialsId, String dockerfile="Dockerfile", String context=".") {
+    return new Docker().docker(repo, tag, credentialsId, dockerfile, context)
+}
+
 /**
  * kubernetes deployer
  * @param resourcePath
@@ -884,7 +1001,7 @@ def deploy(String resourcePath){
 }
 ```
 
-新增`Deploy.groovy`
+新增`Deploy.groovy`    jenins-shared-library/src/com/luffy/devops/Deploy.groovy
 
 ```groovy
 package com.luffy.devops
@@ -930,7 +1047,7 @@ def push() {
         }
 ```
 
-`Jenkinsfile` 中添加如下部分：
+`Jenkinsfile` 中添加如下部分： stage('build-image')部分的下面
 
 ```groovy
         stage('deploy') {
@@ -1025,18 +1142,16 @@ def push() {
      }
    ```
 
-```
-devops.groovy
-```
+`devops.groovy`
 
 通过添加参数 watch来控制是否在pipeline中观察pod的运行状态
 
 ```groovy
 /**
  * 
- * @param resourcePath
- * @param watch
- * @param workloadFilePath
+ * @param resourcePath       # 源代码目录
+ * @param watch              # Boolean watch表示让调用方可以选择同步 或者异步
+ * @param workloadFilePath   # 这个目录是部署项目的kind：deployment类型的 yaml文件目录
  * @return
  */
 def deploy(String resourcePath, Boolean watch = true, String workloadFilePath){
@@ -1053,9 +1168,6 @@ import org.yaml.snakeyaml.Yaml
 import groovy.json.JsonSlurperClassic
 import groovy.time.TimeCategory
 
-
-
-
 def init(String resourcePath, Boolean watch, String workloadFilePath) {
     this.resourcePath = resourcePath
     this.msg = new BuildMessage()
@@ -1066,7 +1178,6 @@ def init(String resourcePath, Boolean watch, String workloadFilePath) {
     }
     return this
 }
-
 
 def start(){
     try{
@@ -1079,7 +1190,6 @@ def start(){
     }
 
     if (this.watch) {
-
         // 初始化workload文件
         initWorkload()
         String namespace = this.workloadNamespace
@@ -1096,7 +1206,6 @@ def start(){
         updateGitlabCommitStatus(name: env.STAGE_NAME, state: 'success')
         this.msg.updateBuildMessage(env.BUILD_TASKS, "${env.STAGE_NAME} OK...  √")
     }
-
 }
 
 def initWorkload() {
@@ -1183,7 +1292,6 @@ def getResource(String namespace = "default", String name, String kind="deployme
     return jsonObj
 }
 
-
 def printContainerLogs(deployJson) {
     if (deployJson == null) {
         return;
@@ -1232,7 +1340,7 @@ def isDeploymentReady(deployJson) {
                     }
                 }
                 echo "Pod running count ${totalCount} == ${readyCount}"
-                return totalCount > 0 && totalCount == readyCount
+                return totalCount > 0 && totalCount == readyCount && totalCount == replicas
             }
         }
     }
@@ -1240,14 +1348,14 @@ def isDeploymentReady(deployJson) {
 }
 ```
 
-修改`Jenkinsfile` 调用部分：
+修改`Jenkinsfile` 调用部分： manifests/myblog_all.yaml 指定yaml路径 myblog的deplpoyment单独拆出来
 
 ```bash
         stage('deploy') {
             steps {
                 container('tools') {
                     script{
-                        devops.deploy("manifests", true, "manifests/deployment.yaml").start()
+                        devops.deploy("manifests", true, "manifests/myblog.dpl.yaml").start()
                     }
                 }
             }
@@ -1264,8 +1372,10 @@ def isDeploymentReady(deployJson) {
 
 由于发送消息通知属于通用的功能，因此有必要把消息通知抽象成为通用的功能。
 
+`devops.groovy`
+
 ```
-devops.groovy
+..........以下增加内容
 /**
  * notificationSuccess
  * @param project
@@ -1291,7 +1401,7 @@ def notificationFailed(String project, String receiver="dingTalk", String creden
 }
 ```
 
-新建`Notification.groovy`文件：
+新建`Notification.groovy`文件：jenkins-shared-library/src/com/luffy/devops/Notification.groovy
 
 ```groovy
 package com.luffy.devops
@@ -1394,7 +1504,7 @@ def getButtonMsg(){
 }
 ```
 
-新建`DingTalk.groovy`文件：
+新建`DingTalk.groovy`文件： jenkins-shared-library/src/com/luffy/devops/DingTalk.groovy
 
 ```groovy
 package com.luffy.devops
@@ -1500,8 +1610,11 @@ pipeline {
 
 sonarqube代码扫描作为通用功能，同样可以使用library实现。
 
+`devops.groovy`
+
 ```
-devops.groovy
+vi jenkins-shared-library/vars/devops.groovy
+..... 以下增加内容
 /**
  * sonarqube scanner
  * @param projectVersion
@@ -1513,7 +1626,7 @@ def scan(String projectVersion="", Boolean waitScan = true) {
 }
 ```
 
-新建`Sonar.groovy`
+新建`Sonar.groovy`     jenkins-shared-library/src/com/luffy/devops/Sonar.groovy
 
 - 可以传递projectVersion作为sonarqube的扫描版本
 - 参数waitScan来设置是否等待本次扫描是否通过
@@ -1526,6 +1639,7 @@ def init(String projectVersion="", Boolean waitScan = true) {
     this.waitScan = waitScan
     this.msg = new BuildMessage()
     if (projectVersion == ""){
+        sh "git config --global --add safe.directory /home/jenkins/agent/workspace/multi-branch-myblog_master"
         projectVersion = sh(returnStdout: true, script: 'git log --oneline -n 1|cut -d " " -f 1')
     }
     sh "echo '\nsonar.projectVersion=${projectVersion}' >> sonar-project.properties"
@@ -1616,17 +1730,63 @@ def startToSonar() {
 
 ###### [初始化robot-cases项目](http://49.7.203.222:3000/#/jenkins-shared-library/func-robot-framework?id=初始化robot-cases项目)
 
-1. 新建gitlab项目，名称为`robot-cases`
+1. 新建gitlab项目，名称为`robot-cases` http://gitlab.luffy.com/luffy/robot-cases
 
-2. clone到本地
+> //http://gitlab.luffy.com/luffy/robot-cases/-/settings/ci_cd
+>
+> 项目设置里 Auto DevOps 功能关闭
 
-3. 本地拷贝myblog项目的`robot.txt`
+1. clone到本地
+
+2. 本地拷贝myblog项目的`robot.txt`
 
    ```bash
    robot-cases/
    └── myblog
        └── robot.txt
    ```
+
+```bash
+[root@k8s-slave1 ~]# git clone http://gitlab.luffy.com/luffy/robot-cases.git
+[root@k8s-slave1 ~]# cd robot-cases
+[root@k8s-slave1 robot-cases]# mkdir myblog
+[root@k8s-slave1 robot-cases]# cp ../myblog/robot.txt ./myblog/
+[root@k8s-slave1 robot-cases]# rm -f ../myblog/robot.txt
+[root@k8s-slave1 robot-cases]# cat ./myblog/robot.txt
+*** Settings ***
+Library           RequestsLibrary
+Library           SeleniumLibrary
+
+*** Variables ***
+${demo_url}       http://myblog.luffy/admin
+
+*** Test Cases ***
+api
+    [Tags]  critical
+    Create Session    api    ${demo_url}
+    ${alarm_system_info}    RequestsLibrary.Get Request    api    /
+    log    ${alarm_system_info.status_code}
+    log    ${alarm_system_info.content}
+    should be true    ${alarm_system_info.status_code} == 200
+
+ui
+    [Tags]  critical
+    ${chrome_options} =     Evaluate    sys.modules['selenium.webdriver'].ChromeOptions()    sys, selenium.webdriver
+    Call Method    ${chrome_options}   add_argument    headless
+    Call Method    ${chrome_options}   add_argument    no-sandbox
+    ${options}=     Call Method     ${chrome_options}    to_capabilities
+    Open Browser    ${demo_url}/    browser=chrome       desired_capabilities=${options}
+    sleep    2s
+    Capture Page Screenshot
+    Page Should Contain    Django
+    close browser
+[root@k8s-slave1 robot-cases]# vi Jenkinsfile
+[root@k8s-slave1 robot-cases]# git add .
+[root@k8s-slave1 robot-cases]# git commit -m "first comiit "
+[root@k8s-slave1 robot-cases]# git push
+```
+
+
 
 ###### [配置Jenkinsfile及自动化任务](http://49.7.203.222:3000/#/jenkins-shared-library/func-robot-framework?id=配置jenkinsfile及自动化任务)
 
@@ -1635,9 +1795,8 @@ robot-cases/
 ├── Jenkinsfile
 └── myblog
     └── robot.txt
-Jenkinsfile
 ```
-
+`Jenkinsfile`
 多个业务项目的测试用例都在一个仓库中，因此需要根据参数设置来决定执行哪个项目的用例
 
 ```groovy
@@ -1647,6 +1806,8 @@ pipeline {
     }
 
     options {
+        buildDiscarder(logRotator(numToKeepStr:'10'))
+        disableConcurrentBuilds()
         timeout(time: 20, unit: 'MINUTES')
         gitLabConnection('gitlab')
     }
@@ -1673,7 +1834,7 @@ pipeline {
                                 env.testDir = "all"
                                 break
                         }
-                        sh 'robot -d artifacts/ ${testDir}/*'
+                        sh 'robot -d artifacts/ ${testDir}/* || echo ok'
                         step([
                             $class : 'RobotPublisher',
                             outputPath: 'artifacts/',
@@ -1697,14 +1858,33 @@ pipeline {
 
 配置流水线的参数化构建任务并验证参数化构建
 
+> jenkins 新建流水线。name ：**robot-cases**
+>
+> ​            流水线
+>
+> ​					定义 ：Pipeline scriptPipeline script from SCM
+>
+> ​						 SCM ：     Git
+>
+> ​							Repositories   Repository URL  http://gitlab.luffy.com/luffy/robot-cases.git
+>
+> ​							Credentials： root/\****
+>
+> 参数化构建过程：**字符参数**
+>
+> ​							名称：**comp**
+
+
+
 ###### [library集成触发任务](http://49.7.203.222:3000/#/jenkins-shared-library/func-robot-framework?id=library集成触发任务)
 
 由于多个项目均需要触发自动构建，因此可以在library中抽象方法，实现接收comp参数，并在library中实现对`robot-cases`项目的触发。
 
 ![img](8基于sharedLibrary进行CICD流程的优化.assets/robot-trigger.png)
 
+`devops.groovy`
 ```
-devops.groovy
+.... 以下增加内容 vi jenkins-shared-library/vars/devops.groovy
 /**
  * 
  * @param comp
@@ -1715,7 +1895,7 @@ def robotTest(String comp=""){
 }
 ```
 
-新建`Robot.groovy`文件
+新建`Robot.groovy`文件  vi jenkins-shared-library/src/com/luffy/devops/Robot.groovy
 
 ```groovy
 package com.luffy.devops
@@ -1748,7 +1928,7 @@ def acceptanceTest(comp) {
 }
 ```
 
-修改`Jenkinsfile`测试调用
+修改`Jenkinsfile`测试调用。 stage: deploy 后面添加
 
 ```groovy
         stage('integration test') {
@@ -1761,6 +1941,111 @@ def acceptanceTest(comp) {
             }
         }
 ```
+
+
+
+Jenkinsfile完整版
+
+```bash
+@Library('luffy-devops') _
+
+pipeline {
+    agent { label 'jnlp-slave'}
+    options {
+        buildDiscarder(logRotator(numToKeepStr:'10'))
+        disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+        gitLabConnection('gitlab')
+    }
+    environment {
+        IMAGE_REPO = "10.211.55.27:5000/demo/myblog"
+        IMAGE_CREDENTIAL = "credential-registry"
+        DINGTALK_CREDS = credentials('dingTalk')
+    }
+    stages {
+        stage('checkout') {
+            steps {
+                container('tools') {
+                    checkout scm
+                }
+            }
+        }
+        stage('git-log') {
+            steps {
+                script{
+                    sh "git log --oneline -n 1 > gitlog.file"
+                    env.GIT_LOG = readFile("gitlog.file").trim()
+                }
+                sh 'printenv'
+            }
+        }
+        stage('CI'){
+            failFast true
+            parallel {
+                stage('Unit Test') {
+                    steps {
+                        echo "Unit Test Stage Skip..."
+                    }
+                }
+                stage('Code Scan') {
+                    steps {
+                        container('tools') {
+                            script {
+                               devops.scan().start()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        stage('build-image') {
+            steps {
+                container('tools') {
+                    script{
+                        devops.docker(
+                            "${IMAGE_REPO}",
+                            "${GIT_COMMIT}",
+                            IMAGE_CREDENTIAL
+                        ).build().push()
+                    }
+                }
+            }
+        }
+        stage('deploy') {
+            steps {
+                container('tools') {
+                    script{
+                        devops.deploy("manifests", true, "manifests/myblog.dpl.yaml").start()
+                    }
+                }
+            }
+        }
+        stage('integration test') {
+            steps {
+                container('tools') {
+                    script{
+                        devops.robotTest("myblog")
+                    }
+                }
+            }
+        }
+    }
+    post {
+        success {
+            script{
+                devops.notificationSuccess("myblog","dingTalk")
+            }
+        }
+        failure {
+            script{
+                devops.notificationFailed("myblog","dingTalk")
+            }
+        }
+    }
+}
+```
+
+
 
 
 
@@ -1873,7 +2158,12 @@ pipeline {
 模板化后的文件：
 
 ```bash
-$ cat deployment.yaml
+[root@k8s-slave1 myblog]# mv manifests/* /tmp
+[root@k8s-slave1 myblog]# cd manifests/
+```
+
+```bash
+cat > deployment.yaml <<\EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1939,18 +2229,18 @@ spec:
           initialDelaySeconds: 10 
           timeoutSeconds: 2
           periodSeconds: 15
-
-$ cat configmap.yaml
+EOF
+cat > configmap.yaml <<\EOF
 apiVersion: v1
-data:
-  MYSQL_HOST: mysql
-  MYSQL_PORT: "3306"
 kind: ConfigMap
 metadata:
   name: myblog
   namespace: {{NAMESPACE}}
-
-$ cat secret.yaml
+data:
+  MYSQL_HOST: mysql
+  MYSQL_PORT: "3306"
+EOF
+cat > secret.yaml <<\EOF
 apiVersion: v1
 data:
   MYSQL_PASSWD: MTIzNDU2
@@ -1960,8 +2250,8 @@ metadata:
   name: myblog
   namespace: {{NAMESPACE}}
 type: Opaque
-
-$ cat service.yaml
+EOF
+cat > service.yaml <<\EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -1978,8 +2268,8 @@ spec:
   type: ClusterIP
 status:
   loadBalancer: {}
-
-$ cat ingress.yaml
+EOF
+cat > ingress.yaml <<\EOF
 apiVersion: extensions/v1beta1
 kind: Ingress
 metadata:
@@ -1996,6 +2286,7 @@ spec:
         path: /
 status:
   loadBalancer: {}
+EOF
 ```
 
 ###### [实现library配置替换逻辑](http://49.7.203.222:3000/#/jenkins-shared-library/cicd?id=实现library配置替换逻辑)
@@ -2048,7 +2339,7 @@ pipeline {
 }
 ```
 
-我们可以选择和替换image镜像地址一样，来执行替换：
+我们可以选择和替换image镜像地址一样，来执行替换：(不推荐)
 
 ```groovy
 def tplHandler(){
@@ -2106,6 +2397,13 @@ def tplHandler(){
 这样，则以后再有新增的项目，则只需要维护`devops-config`配置文件即可，shared-library则不需要随着项目的增加而进行修改，通过这种方式实现library和具体的项目解耦。
 
 ```groovy
+# vi jenkins-shared-library/src/com/luffy/devops/Deploy.groovy
+def start(){
+    try{
+        // sh "sed -i 's#{{IMAGE_URL}}#${env.CURRENT_IMAGE}#g' ${this.resourcePath}/*" //这行删除
+        this.tplHandler() //新增代码
+      
+//.....中间代码省略。start方法结尾增加
 def tplHandler(){
     sh "sed -i 's#{{IMAGE_URL}}#${env.CURRENT_IMAGE}#g' ${this.resourcePath}/*"
     String namespace = "dev"
@@ -2130,7 +2428,6 @@ def tplHandler(){
 1. 创建开发和测试环境的命名空间
 
    ```bash
-   # 
    $ kubectl create namespace dev
    $ kubectl create namespace test
    ```
@@ -2221,27 +2518,55 @@ def tplHandler(){
    - {{INGRESS_MYBLOG}}
    - {{IMAGE_URL}}
 
+   ```bash
+   # 上一步已经做完
+   [root@k8s-slave1 manifests]# ll
+   -rw-r--r--. 1 root root  130 11月  3 11:06 configmap.yaml
+   -rw-r--r--. 1 root root 1702 11月  3 11:06 deployment.yaml
+   -rw-r--r--. 1 root root  280 11月  3 11:06 ingress.yaml
+   -rw-r--r--. 1 root root  147 11月  3 11:06 secret.yaml
+   -rw-r--r--. 1 root root  245 11月  3 11:06 service.yaml
+   ```
+
+   
+
 4. 初始化开发环境和测试环境的`devops-config`
 
    ```bash
    # 开发环境
-   $ cat devops-config-dev.txt
+   cat > devops-config-dev.txt <<EOF
    NAMESPACE=dev
    INGRESS_MYBLOG=blog-dev.luffy.com
-   
+   EOF
    $ kubectl -n dev create configmap devops-config --from-env-file=devops-config-dev.txt
    
    # 测试环境
-   $ cat devops-config-test.txt
+   cat > devops-config-test.txt <<EOF
    NAMESPACE=test
    INGRESS_MYBLOG=blog-test.luffy.com
-   
+   EOF
    $ kubectl -n test create configmap devops-config --from-env-file=devops-config-test.txt
    ```
 
 5. 提交最新的library代码
 
-6. 提交最新的python-demo项目代码
+6. 提交最新的python-demo项目代码。`Jenkinsfile`      /myblog/Jenkinsfile
+
+   ```bash
+   # 创建两个分支  提醒jenkins多分分支设置里分支过滤添加一下这两个分支
+   [root@k8s-slave1 myblog]# git checkout -b dev
+   [root@k8s-slave1 myblog]# git push --set-upstream origin dev
+   [root@k8s-slave1 myblog]# git checkout -b test  #这一步可以等dev流程构建完再创建
+   [root@k8s-slave1 myblog]# git push --set-upstream origin test
+   
+   # git branch  #查看本地分支。  -r 查看远程分支  
+   [root@k8s-slave1 myblog]# git branch -r
+   # 切换dev分支
+   [root@k8s-slave1 myblog]# git checkout dev
+   [root@k8s-slave1 myblog]# vi Jenkinsfile
+   ```
+
+   
 
    ```groovy
    @Library('luffy-devops') _
@@ -2249,11 +2574,13 @@ def tplHandler(){
    pipeline {
        agent { label 'jnlp-slave'}
        options {
+           buildDiscarder(logRotator(numToKeepStr:'10'))
+           disableConcurrentBuilds()
            timeout(time: 20, unit: 'MINUTES')
            gitLabConnection('gitlab')
        }
        environment {
-           IMAGE_REPO = "172.21.51.143:5000/myblog"
+           IMAGE_REPO = "10.211.55.27:5000/myblog"
            IMAGE_CREDENTIAL = "credential-registry"
            DINGTALK_CREDS = credentials('dingTalk')
            PROJECT = "myblog"
@@ -2347,20 +2674,25 @@ def tplHandler(){
 
 2. 配置hosts解析，测试使用`http://blog-dev.luffy.com/blog/index/`进行访问到develop分支最新版本
 
-3. 合并代码至master分支
+```bash
+[root@k8s-master cicd]# curl -HHost:blog-dev.luffy.com  10.211.55.25/blog/index/
+```
 
-4. 在gitlab中创建tag，观察是否自动部署至test的命名空间中，且使用`myblog-test.luffy.com/blog/index/`可以访问到最新版本
+1. 合并代码至master分支
+
+2. 在gitlab中创建tag，观察是否自动部署至test的命名空间中，且使用`myblog-test.luffy.com/blog/index/`可以访问到最新版本
 
 ###### [实现打tag后自动部署](http://49.7.203.222:3000/#/jenkins-shared-library/cicd?id=实现打tag后自动部署)
 
-我们发现，打了tag以后，多分支流水线中可以识别到该tag，但是并不会自动部署该tag的代码。因此，我们来使用一个新的插件：Basic Branch Build Strategies Plugin
+我们发现，打了tag以后，多分支流水线中可以识别到该tag，但是并不会自动部署该tag的代码。因此，我们来使用一个新的插件： 
 
 安装并配置多分支流水线，注意Build strategies 设置：
 
-- Regular branches
-- Tags
+- Regular branches  #新增
+- Skip initial build on first branch indexing.  # 分支第一次扫描就不执行任务了； 
+- Tags  #新增
   - Ignore tags newer than 可以不用设置，不然会默认不自动构建新打的tag
-  - Ignore tags older than
+  - Ignore tags older than   填3。表示最新的v1版本tag的时间超过3天了就不构建了
 
 ###### [优化镜像部署逻辑](http://49.7.203.222:3000/#/jenkins-shared-library/cicd?id=优化镜像部署逻辑)
 
@@ -2373,6 +2705,7 @@ def tplHandler(){
 很明显我们更期望使用思路二的方式来实现，因此，需要调整如下逻辑：
 
 ```bash
+# vi jenkins-shared-library/src/com/luffy/devops/Docker.groovy
 def docker(String repo, String tag, String credentialsId, String dockerfile="Dockerfile", String context="."){
     this.repo = repo
     this.tag = tag
@@ -2392,6 +2725,42 @@ def docker(String repo, String tag, String credentialsId, String dockerfile="Doc
 提交代码，并进行测试，观察是否使用tag作为镜像标签进行部署。
 
 
+
+###### 多个K8s集群部署怎么做？
+
+参考 [使用 kubectl 管理多个 k8s 集群 - 知乎 (zhihu.com)](https://zhuanlan.zhihu.com/p/104687460)
+
+```bash
+使用  kubectl config use-context dev  做集群的切换。
+
+提前在tools 镜像里配置好两个集群的kubeconfig 文件 # /root/.kube/config
+
+修改 jenkins-shared-library/src/com/luffy/devops/Deploy.groovy
+def tplHandler(){
+    sh "sed -i 's#{{IMAGE_URL}}#${env.CURRENT_IMAGE}#g' ${this.resourcePath}/*"
+    sh "kubectl config use-context dev" 
+    String namespace = "dev"
+    if(env.TAG_NAME){
+    		sh "kubectl config use-context test"
+        namespace = "test"
+    }
+    try {
+        def configMapData = this.getResource(namespace, "devops-config", "configmap")["data"]
+        configMapData.each { k, v ->
+            echo "key is ${k}, val is ${v}"
+            sh "sed -i 's#{{${k}}}#${v}#g' ${this.resourcePath}/*"
+        }
+    }catch (Exception exc) {
+        echo "failed to get devops-config data,exception: ${exc}."
+        throw exc
+    }
+}
+
+```
+
+
+
+ 
 
 # [小结](http://49.7.203.222:3000/#/jenkins-shared-library/summary?id=小结)
 
