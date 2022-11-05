@@ -123,6 +123,14 @@ https://spring.io/projects
 
 配置Project Metadata：
 
+> group：com.luffy
+>
+> Artifact:  springboot-demo
+>
+> Type: Maven Project
+>
+> java :   8
+
 ![img](9Spring Cloud微服务项目交付.assets/new-springboot-2.jpg)
 
 配置Dependencies依赖包：
@@ -139,12 +147,16 @@ https://spring.io/projects
 
 解压后放到`D:\software\apache-maven-3.6.3`,修改`D:\software\apache-maven-3.6.3\conf\settings.xml` 文件：
 
+> // 虚拟机里只有C盘 这里就解决到c盘了
+>
+> C:\apache-maven-3.6.3
+
 ```bash
 <?xml version="1.0" encoding="UTF-8"?>
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
-  <localRepository>D:\opt\maven-repo</localRepository>
+  <localRepository>C:\opt\maven-repo</localRepository>
   
   <pluginGroups>
   </pluginGroups>
@@ -175,11 +187,13 @@ https://spring.io/projects
 
 ![img](9Spring Cloud微服务项目交付.assets/new-springboot-4.png)
 
+> Maven home directory: C:\apache-maven-3.6.3
+
 ![img](9Spring Cloud微服务项目交付.assets/new-springboot-5.jpg)
 
 > springboot版本为2.3.6.RELEASE
 
-默认生成的SpringBoot版本为2.5.2，换成2.3.6.RELEASE版本
+默认生成的SpringBoot版本为2.5.2，换成2.3.6.RELEASE版本。pom.xml文件
 
 ```xml
 ...
@@ -195,6 +209,8 @@ https://spring.io/projects
 直接启动项目并访问本地服务：`localhost:8080`
 
 ##### [编写功能代码](http://49.7.203.222:3000/#/spring-cloud/springboot-demo/demo?id=编写功能代码)
+
+在mian–》java–> com.luffy.springbootdemo 右键java Class 输入 controller.HelloController.java
 
 创建controller包及`HelloController.java`文件
 
@@ -477,20 +493,23 @@ Maven有三套相互独立的生命周期，分别是clean、default和site。�
 
 创建gitlab组，`luffy-spring-cloud`,在该组下创建项目`springboot-demo`
 
+备注： 关闭默认的auto devops 功能
+
 - 提交代码到git仓库
 
   ```bash
-  $ git init
-  $ git remote add origin http://gitlab.luffy.com/luffy-spring-cloud/springboot-demo.git
-  $ git add .
-  $ git commit -m "Initial commit"
-  $ git push -u origin master
+  [root@k8s-slave1 ~]# cd springboot-demo/
+  git init
+  git remote add origin http://gitlab.luffy.com/luffy-spring-cloud/springboot-demo.git
+  git add .
+  git commit -m "Initial commit"
+  git push -u origin master
   ```
 
 - 使用tools容器来运行
 
   ```bash
-  $ docker run --rm -ti 172.21.51.143:5000/devops/tools:v3 bash
+  $ docker run --rm -ti 10.211.55.27:5000/devops/tools:v3 bash
   bash-5.0# mvn -v
   bash: mvn: command not found
   # 由于idea工具自带了maven，所以可以直接在ide中执行mvn命令。在tools容器中，需要安装mvn命令
@@ -529,19 +548,98 @@ Maven有三套相互独立的生命周期，分别是clean、default和site。�
   #------------------------------------------------#
   ```
 
+操作记录
+
+```bash
+[root@k8s-master ~]# cd jenkins/tools
+[root@k8s-master tools]# cat apache-maven-3.6.3/conf/settings.xml
+<?xml version="1.0" encoding="UTF-8"?>
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <localRepository>\opt\maven-repo</localRepository>
+  <pluginGroups>
+  </pluginGroups>
+
+  <proxies>
+  </proxies>
+
+  <servers>
+  </servers>
+
+  <mirrors>
+    <mirror>
+      <id>alimaven</id>
+      <mirrorOf>central</mirrorOf>
+      <name>aliyun maven</name>
+      <url>http://maven.aliyun.com/nexus/content/repositories/central/</url>
+    </mirror>
+    <mirror>
+      <id>nexus-aliyun</id>
+      <mirrorOf>*</mirrorOf>
+      <name>Nexus aliyun</name>
+      <url>http://maven.aliyun.com/nexus/content/groups/public</url>
+    </mirror>
+  </mirrors>
+
+</settings>
+[root@k8s-master tools]# cat Dockerfile
+FROM alpine:3.13.4
+LABEL maintainer="inspur_lyx@hotmail.com"
+USER root
+
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories && \
+    apk update && \
+    apk add  --no-cache openrc docker git curl tar gcc g++ make \
+    bash shadow openjdk8 python2 python2-dev py-pip python3-dev openssl-dev libffi-dev \
+    libstdc++ harfbuzz nss freetype ttf-freefont chromium chromium-chromedriver && \
+    mkdir -p /root/.kube && \
+    usermod -a -G docker root
+
+
+COPY config /root/.kube/
+
+COPY requirements.txt /
+
+RUN python3 -m pip install --upgrade pip && pip3 install -i http://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com -r requirements.txt
+
+
+RUN rm -rf /var/cache/apk/* && \
+    rm -rf ~/.cache/pip
+
+#-----------------安装 kubectl--------------------#
+COPY kubectl /usr/local/bin/
+RUN chmod +x /usr/local/bin/kubectl
+# ------------------------------------------------#
+
+#---------------安装 sonar-scanner-----------------#
+COPY sonar-scanner /usr/lib/sonar-scanner
+RUN ln -s /usr/lib/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner && chmod +x /usr/local/bin/sonar-scanner
+ENV SONAR_RUNNER_HOME=/usr/lib/sonar-scanner
+# ------------------------------------------------#
+
+#-----------------安装 maven--------------------#
+COPY apache-maven-3.6.3 /usr/lib/apache-maven-3.6.3
+RUN ln -s /usr/lib/apache-maven-3.6.3/bin/mvn /usr/local/bin/mvn && chmod +x /usr/local/bin/mvn
+ENV MAVEN_HOME=/usr/lib/apache-maven-3.6.3
+#------------------------------------------------#
+```
+
+
+
 去master节点拉取最新代码，构建最新的tools镜像：
 
 ```bash
   # k8s-master节点
-  $ git pull
-  $ docker build . -t 172.21.51.143:5000/devops/tools:v4 -f Dockerfile
-  $ docker push 172.21.51.143:5000/devops/tools:v4
+  $ git pull   #这里是tools文件夹
+  $ docker build . -t 10.211.55.27:5000/devops/tools:v4 -f Dockerfile
+  $ docker push 10.211.55.27:5000/devops/tools:v4
 ```
 
 再次尝试mvn命令：
 
 ```bash
-$ docker run -v /var/run/docker.sock:/var/run/docker.sock --rm -ti 172.21.51.143:5000/devops/tools:v4 bash
+$ docker run -v /var/run/docker.sock:/var/run/docker.sock --rm -ti 10.211.55.27:5000/devops/tools:v4 bash
 bash-5.0# mvn -v
 bash-5.0# git clone http://gitlab.luffy.com/luffy-spring-cloud/springboot-demo.git
 bash-5.0# cd springboot-demo
@@ -554,7 +652,7 @@ bash-5.0# mvn clean package
 
 想系统学习maven，可以参考： https://www.runoob.com/maven/maven-pom.html
 
-
+Maven官方地址：[repo1.maven.org/maven2/](http://repo1.maven.org/maven2/)
 
 ##[springboot项目接入cicd](http://49.7.203.222:3000/#/spring-cloud/springboot-demo/cicd)
 
@@ -577,12 +675,17 @@ CMD [ "sh", "-c", "java -jar /app.jar" ]
 我们可以为构建出的镜像指定名称：
 
 ```xml
-    <build>
-        <finalName>${project.artifactId}</finalName><!--打jar包去掉版本号-->
+bash-5.1# vi pom.xml    # 修改的是springboot-demo 仓库里的
+		<build>
+        <finalName>${project.artifactId}</finalName> <!--打jar包去掉版本号-->
     ...
+      
+bash-5.1# mvn clean package
 ```
 
-`Dockerfile`对应修改：
+
+
+`Dockerfile`对应修改： #这个文件添加到 springboot-demo仓库里
 
 ```dockerfile
 FROM openjdk:8-jdk-alpine
@@ -595,9 +698,11 @@ CMD [ "sh", "-c", "java -jar /app.jar" ]
 ```bash
 $ docker build . -t springboot-demo:v1 -f Dockerfile
 
-$ docker run -d --name springboot-demo -p 8080:8080 springboot-demo:v1
+docker run -d --name springboot-demo -p 8080:8080 springboot-demo:v1
 
-$ curl localhost:8080
+curl localhost:8080
+
+docker rm -f springboot-demo
 ```
 
 ##### [接入CICD流程](http://49.7.203.222:3000/#/spring-cloud/springboot-demo/cicd?id=接入cicd流程)
@@ -611,8 +716,9 @@ $ curl localhost:8080
 - `manifests/ingress.yaml`
 - `configmap/devops-config`
 
+`Jenkinsfile`
+
 ```
-Jenkinsfile
 @Library('luffy-devops') _
 
 pipeline {
@@ -622,7 +728,7 @@ pipeline {
         gitLabConnection('gitlab')
     }
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/spring-cloud/springboot-demo"
+        IMAGE_REPO = "10.211.55.27:5000/spring-cloud/springboot-demo"
         IMAGE_CREDENTIAL = "credential-registry"
         DINGTALK_CREDS = credentials('dingTalk')
         PROJECT = "springboot-demo"
@@ -700,7 +806,10 @@ pipeline {
         }
     }
 }
-sonar-project.properties
+```
+`sonar-project.properties`
+
+```bash
 sonar.projectKey=springboot-demo
 sonar.projectName=springboot-demo
 # if you want disabled the DTD verification for a proxy problem for example, true by default
@@ -709,7 +818,11 @@ sonar.sources=src/main/java
 sonar.language=java
 sonar.tests=src/test/java
 sonar.java.binaries=target/classes
-manifests/deployment.yaml
+```
+
+`manifests/deployment.yaml`
+
+```
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -754,7 +867,11 @@ spec:
             initialDelaySeconds: 120
             timeoutSeconds: 2
             periodSeconds: 15
-manifests/service.yaml
+```
+
+`manifests/service.yaml`
+
+```
 apiVersion: v1
 kind: Service
 metadata:
@@ -769,7 +886,11 @@ spec:
     app: springboot-demo
   sessionAffinity: None
   type: ClusterIP
-manifests/ingress.yaml
+```
+
+`manifests/ingress.yaml`
+
+```
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -801,23 +922,53 @@ data:
 ...
 ```
 
-更新Jenkins中的jnlp-slave-pod模板镜像：
+更新Jenkins中的jnlp-slave-pod模板镜像： 路径http://jenkins.luffy.com/configureClouds/
 
 ```bash
-172.21.51.143:5000/devops/tools:v4
+10.211.55.27:5000/devops/tools:v4
 ```
 
 由于镜像中maven的目录是`/opt/maven-repo`，而slave-pod是执行完任务后会销毁，因此需要将maven的数据目录挂载出来，不然每次构建都会重新拉取所有依赖的jar包：
 
+Host Path Volume：  /opt/maven-repo
+
 ![img](9Spring Cloud微服务项目交付.assets/maven-repo-vols.jpg)
 
 配置Jenkins流水线：
+
+> 添加一个任务名称： springboot-demo
+>
+> 复制： multi-branch-myblog
+>
+> 添加后 修改git仓库源： http://gitlab.luffy.com/luffy-spring-cloud/springboot-demo.git
+>
+> 根据名称过滤（支持正则表达式）： develop|v.*
+
+```bash
+[root@k8s-slave1 springboot-demo]# git status
+# 位于分支 master
+# 未跟踪的文件:
+#   （使用 "git add <file>..." 以包含要提交的内容）
+#
+#	Jenkinsfile
+#	manifests/
+#	sonar-project.properties
+[root@k8s-slave1 springboot-demo]# git add .
+[root@k8s-slave1 springboot-demo]# git commit -am "add cicd"
+[root@k8s-slave1 springboot-demo]# git push
+[root@k8s-slave1 springboot-demo]# git checkout -b develop
+[root@k8s-slave1 springboot-demo]# git push -u origin develop
+```
+
+
 
 ##### [添加单元测试覆盖率](http://49.7.203.222:3000/#/spring-cloud/springboot-demo/cicd?id=添加单元测试覆盖率)
 
 单元测试这块内容一直没有把覆盖率统计到`sonarqube`端，本节看下怎么样将单元测试的结果及覆盖率展示到Jenkins及`sonarqube`平台中。
 
 为了展示效果，我们先添加一个单元测试文件`HelloControllerTests`：
+
+在test–》java–> com.luffy.springbootdemo 右键java Class 输入 HelloControllerTests
 
 ```java
 package com.luffy.springbootdemo;
@@ -895,9 +1046,10 @@ public class HelloControllerTests {
 
 `jacoco`：监控JVM中的调用，生成监控结果（默认保存在`jacoco.exec`文件中），然后分析此结果，配合源代码生成覆盖率报告。
 
-如何引入`jacoco`测试：
+如何引入`jacoco`测试： 在pom.xml文件中
 
 ```yaml
+# 在pom.xml <build>==> <plugins>==><plugsins>下增加       
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
@@ -982,17 +1134,35 @@ https://docs.spring.io/spring-cloud-netflix/docs/3.0.3/reference/html/
 
 ##### [新建项目](http://49.7.203.222:3000/#/spring-cloud/register-center?id=新建项目)
 
+> 类型： Spring Initializr
+>
+> GRoup： com.luffy
+>
+> Artifact: eureka
+>
+> Type: maven project
+>
+> Java: 8
+>
+
 ![img](9Spring Cloud微服务项目交付.assets/new-eureka.jpg)
 
 pom中引入spring-cloud的依赖：
+
+
+
+```bash
+//修改版本 pom.xml 
+<version>2.3.6.RELEASE</version>
+```
 
 https://spring.io/projects/spring-cloud#overview
 
 ```xml
 <properties>
-    <spring.cloud-version>Hoxton.SR9</spring.cloud-version>
+    <spring.cloud-version>Hoxton.SR9</spring.cloud-version> <!--增加-->
 </properties>
-<dependencyManagement>
+<dependencyManagement>   <!--增加-->
     <dependencies>
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -1014,11 +1184,77 @@ https://spring.io/projects/spring-cloud#overview
         </dependency>
 ```
 
+
+
+操作记录。完整版pom.xml
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.3.6.RELEASE</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.luffy</groupId>
+    <artifactId>eureka</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>eureka</name>
+    <description>Demo project for Spring Boot</description>
+    <properties>
+        <java.version>1.8</java.version>
+        <spring.cloud-version>Hoxton.SR9</spring.cloud-version>
+    </properties>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring.cloud-version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-server</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
+
+```
+
+ 
+
 ##### [启动eureka服务](http://49.7.203.222:3000/#/spring-cloud/register-center?id=启动eureka服务)
 
 https://docs.spring.io/spring-cloud-netflix/docs/2.2.5.RELEASE/reference/html/#spring-cloud-eureka-server-standalone-mode
 
-application.yml
+src/main/resources/application.yml   修改之前properties后缀名为yaml
 
 ```yaml
 server:
@@ -1034,7 +1270,7 @@ eureka:
     hostname: localhost
 ```
 
-启动类：
+启动类： src/main/java/com.luffy.eureka/EureKaApplication.java
 
 ```java
 package com.luffy.eureka;
@@ -1062,7 +1298,7 @@ public class EurekaServerApplication {
 
 ##### [eureka认证](http://49.7.203.222:3000/#/spring-cloud/register-center?id=eureka认证)
 
-没有认证，不安全，添加认证：
+没有认证，不安全，添加认证：修改 pom.xml
 
 ```xml
         <dependency>
@@ -1071,7 +1307,7 @@ public class EurekaServerApplication {
         </dependency>
 ```
 
-application.yml
+application.yml    //  src/main/resources/application.yml
 
 ```yaml
 server:
@@ -1091,11 +1327,38 @@ spring:
       password: ${EUREKA_PASS:admin}
   application:
     name: eureka
+    
+--------参数说明
+${EUREKA_USER:admin} #先去读系统环境变量，没有的话默认值就是admin
 ```
+
+浏览器再次访问 localhost:8761    输入账号密码 admin admin 登录
+
+小记录： 运行提示端口已经被占用， windows如何杀死8761对应的进程；
+
+```bash
+C:\Users\kanghua>netstat -aon |findstr "8761"
+  TCP    0.0.0.0:8761           0.0.0.0:0              LISTENING       3420
+  TCP    [::]:8761              [::]:0                 LISTENING       3420
+C:\Users\kanghua>taskkill -F /pid 3420
+成功: 已终止 PID 为 3420 的进程。
+```
+
+
 
 ##### [注册服务到eureka](http://49.7.203.222:3000/#/spring-cloud/register-center?id=注册服务到eureka)
 
-新建项目，user-service（选择Spring Cloud依赖和SpringBoot Web依赖），用来提供用户查询功能。
+新建项目，user-service~~（选择Spring Cloud依赖和SpringBoot Web依赖）~~，用来提供用户查询功能。
+
+> Group: com.luffy
+>
+> Artifact: user-service 
+>
+> Type: maven project
+>
+> Java: 8
+
+新创建完项目设置里配置maven home directory : C:/apache-maven-3.6.3
 
 三部曲：
 
@@ -1104,6 +1367,13 @@ spring:
 - 创建Springboot启动类，并配置注解
 
 `pom.xml`添加：
+
+```bash
+//修改版本 pom.xml 
+<version>2.3.6.RELEASE</version>
+```
+
+
 
 ```xml
         <dependency>
@@ -1114,7 +1384,80 @@ spring:
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-application.yml
+```
+
+操作记录完整po m.xml
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>2.3.6.RELEASE</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.luffy</groupId>
+    <artifactId>user-service</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>user-service</name>
+    <description>Demo project for Spring Boot</description>
+    <properties>
+        <java.version>1.8</java.version>
+        <spring.cloud-version>Hoxton.SR9</spring.cloud-version>
+    </properties>
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring.cloud-version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
+
+```
+
+
+
+`application.yml` main/resources/application.yml
+
+```
 server:
   port: 7000
 eureka:
@@ -1123,7 +1466,7 @@ eureka:
       defaultZone: http://${EUREKA_USER:admin}:${EUREKA_PASS:admin}@localhost:8761/eureka/
 ```
 
-启动类：
+启动类： main/java/com.luffy.userservice/UserServiceApplication
 
 ```java
 package com.luffy.user;
@@ -1137,8 +1480,9 @@ import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 //若写了具体的注册中心注解，则当替换成其他注册中心时，又需要替换成对应的注解了。
 //所以 直接使用@EnableDiscoveryClient 启动发现。
 //这样在替换注册中心时，只需要替换相关依赖即可。
-@EnableDiscoveryClient
+
 @SpringBootApplication
+@EnableDiscoveryClient
 public class UserServiceApplication {
     public static void main(String[] args) {
         SpringApplication.run(UserServiceApplication.class, args);
@@ -1152,7 +1496,9 @@ public class UserServiceApplication {
 c.n.d.s.t.d.RetryableEurekaHttpClient    : Request execution failed with message: com.fasterxml.jackson.databind.exc.MismatchedInputException: Root name 'timestamp' does not match expected ('instance') for type [simple type, class com.netflix.appinfo.InstanceInfo]
 ```
 
-新版本的security默认开启csrf了，关掉，在注册中心新建一个类，继承WebSecurityConfigurerAdapter来关闭 ,> 注意，是在eureka server端关闭。
+新版本的security默认开启csrf了，关掉，在注册中心新建一个类WebSecurityConfig，继承WebSecurityConfigurerAdapter来关闭 ,> 注意，是在**eureka server端**关闭。
+
+Mian–>java–>com.luffy.eureka. 右键 java Class 名称：WebSecurityConfig
 
 ```java
 package com.luffy.eureka;
@@ -1174,11 +1520,11 @@ public class WebSecurityConfig extends WebSecurityConfigurerAdapter {
 }
 ```
 
-再次启动发现可以注册，但是地址是
+再次启动发现可以注册，http://localhost:8761/  但是地址是
 
 ![image-20200915211607173](9Spring Cloud微服务项目交付.assets/image-20200915211607173.png)
 
-application.yaml
+application.yaml   service端 重新修改main/resources/application.yml
 
 ```yaml
 server:
@@ -1226,17 +1572,24 @@ Eurake有一个配置参数eureka.server.renewalPercentThreshold，定义了rene
 
 ![img](9Spring Cloud微服务项目交付.assets/eureka-cluster.jpg)
 
-拷贝`eureka`服务，分别命名`eureka-ha-peer1`和`eureka-ha-peer2`
+拷贝`eureka项目目录，分别命名`eureka-ha-peer1`和`eureka-ha-peer2`
 
 修改模块的`pom.xml`
 
 ```xml
-<artifactId>eureka-ha-peer1</artifactId>
+    <artifactId>eureka-ha-peer1</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>eureka-ha-peer1</name>
+# 两个都修改 用记事本打开修改完后再用idea工具打开 
+    <artifactId>eureka-ha-peer2</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>eureka-ha-peer2</name>
 ```
 
 修改配置文件`application.yml`，注意集群服务，需要各个eureka的spring.application.name相同
 
 ```yaml
+#eureka-ha-peer1/src/main/resources/application.yml
 server:
   port: ${EUREKA_PORT:8762}
 eureka:
@@ -1254,15 +1607,40 @@ spring:
       password: ${EUREKA_PASS:admin}
   application:
     name: eureka-cluster
+    
+#eureka-ha-peer2/src/main/resources/application.yml
+server:
+  port: ${EUREKA_PORT:8763}
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_SERVER:http://${spring.security.user.name}:${spring.security.user.password}@peer1:8762/eureka/,http://${spring.security.user.name}:${spring.security.user.password}@peer2:8763/eureka/}
+    fetch-registry: true
+  instance:
+    instance-id: ${eureka.instance.hostname}:${server.port}
+    hostname: peer2
+spring:
+  security:
+    user:
+      name: ${EUREKA_USER:admin}
+      password: ${EUREKA_PASS:admin}
+  application:
+    name: eureka-cluster
 ```
 
-设置hosts文件
+设置hosts文件 ； C:\Windows\System32\drivers\etc\hosts
 
 ```bash
 127.0.0.1 peer1 peer2
 ```
 
+两个项目都启动（有一个启动会报一个error，）， 然后浏览器访问 http://localhost:8762/ admin。admin 登录查看
+
+
+
 服务提供者若想连接高可用的eureka，需要修改：
+
+比如： user-service项目配置文件src/main/resources/application.yml
 
 ```bash
       defaultZone: http://${EUREKA_USER:admin}:${EUREKA_PASS:admin}@peer1:8762/eureka/,http://${EUREKA_USER:admin}:${EUREKA_PASS:admin}@peer2:8763/eureka/
@@ -1282,8 +1660,18 @@ spring:
 
   ![img](9Spring Cloud微服务项目交付.assets/eureka-sts.jpg)
 
+`eureka-statefulset.yaml` 
+
+```bash
+eureka项目创建 manifests 目录 新建 sts.yaml  复制下面内容
+模块化修改地方
+  namespace: {{NAMESPACE}}
+      image: {{IMAGE_URL}}
 ```
-eureka-statefulset.yaml
+
+
+
+```
 # eureka-statefulset.yaml
 apiVersion: apps/v1
 kind: StatefulSet
@@ -1303,7 +1691,7 @@ spec:
     spec:
       containers:
         - name: eureka
-          image: 172.21.51.143:5000/spring-cloud/eureka-cluster:v1
+          image: 10.211.55.27:5000/spring-cloud/eureka-cluster:v1
           ports:
             - containerPort: 8761
           resources:
@@ -1336,7 +1724,11 @@ spec:
               value: ${MY_POD_NAME}.eureka
             - name: EUREKA_PORT
               value: "8761"
-eureka-headless-service.yaml
+```
+
+`eureka-headless-service.yaml`
+
+```
 apiVersion: v1
 kind: Service
 metadata:
@@ -1450,16 +1842,30 @@ $ kubectl -n spring exec  -ti nginx-statefulset-0 sh
 - manifests/statefulset.yaml,service.yaml
 - sonar-project.properties
 
+
+
+> mvnw  mvnw.cmd 这两个windows文件可以删除掉
+
 在pom.xml中重写jar包名称：
 
 ```xml
-<finalName>${project.artifactId}</finalName>
-Dockerfile
+<build>
+  <finalName>${project.artifactId}</finalName>
+  ....省略代码
+</build>
+
+```
+
+`Dockerfile`
+```
 FROM openjdk:8-jdk-alpine
 ADD target/eureka.jar app.jar
 ENV JAVA_OPTS=""
 CMD [ "sh", "-c", "java $JAVA_OPTS -jar /app.jar" ]
-Jenkinsfile
+```
+
+`Jenkinsfile`
+```
 @Library('luffy-devops') _
 
 pipeline {
@@ -1469,7 +1875,7 @@ pipeline {
         gitLabConnection('gitlab')
     }
     environment {
-        IMAGE_REPO = "172.21.51.143:5000/spring-cloud/eureka-cluster"
+        IMAGE_REPO = "10.211.55.27:5000/spring-cloud/eureka-cluster"
         IMAGE_CREDENTIAL = "credential-registry"
         DINGTALK_CREDS = credentials('dingTalk')
         PROJECT = "eureka-cluster"
@@ -1547,7 +1953,11 @@ pipeline {
         }
     }
 }
-sonar-project.properties
+```
+
+`sonar-project.properties`
+
+```
 sonar.projectKey=eureka-cluster
 sonar.projectName=eureka-cluster
 # if you want disabled the DTD verification for a proxy problem for example, true by default
@@ -1558,10 +1968,11 @@ sonar.tests=src/test/java
 sonar.java.binaries=target/classes
 ```
 
-模板化k8s资源清单：
+模板化k8s资源清单： 创建目录manifests
+
+`statefulset.yaml`
 
 ```bash
-# eureka-statefulset.yaml
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -1581,8 +1992,100 @@ spec:
       containers:
         - name: eureka
           image: {{IMAGE_URL}}
-...
+          ports:
+            - containerPort: 8761
+          resources:
+            requests:
+              memory: 400Mi
+              cpu: 50m
+            limits:
+              memory: 2Gi
+              cpu: 2000m
+          env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: JAVA_OPTS
+              value: -XX:+UnlockExperimentalVMOptions
+                -XX:+UseCGroupMemoryLimitForHeap
+                -XX:MaxRAMFraction=2
+                -XX:CICompilerCount=8
+                -XX:ActiveProcessorCount=8
+                -XX:+UseG1GC
+                -XX:+AggressiveOpts
+                -XX:+UseFastAccessorMethods
+                -XX:+UseStringDeduplication
+                -XX:+UseCompressedOops
+                -XX:+OptimizeStringConcat
+            - name: EUREKA_SERVER
+              value: "http://admin:admin@eureka-cluster-0.eureka:8761/eureka/,http://admin:admin@eureka-cluster-1.eureka:8761/eureka/,http://admin:admin@eureka-cluster-2.eureka:8761/eureka/"
+            - name: EUREKA_INSTANCE_HOSTNAME
+              value: ${MY_POD_NAME}.eureka
+            - name: EUREKA_PORT
+              value: "8761"
 ```
+
+`svc.headless.yaml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: eureka
+  namespace: {{NAMESPACE}}
+  labels:
+    app: eureka
+spec:
+  ports:
+    - port: 8761
+      name: eureka
+  clusterIP: None
+  selector:
+    app: eureka-cluster
+```
+
+`svc.yaml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: eureka-ingress
+  namespace: {{NAMESPACE}}
+  labels:
+    app: eureka-cluster
+spec:
+  ports:
+    - port: 8761
+      name: eureka-cluster
+  selector:
+    app: eureka-cluster
+```
+
+`ing.yaml`
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: eureka-cluster
+  namespace: {{NAMESPACE}}
+spec:
+  rules:
+    - host: {{INGRESS_EUREKA}}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: eureka-ingress
+                port:
+                  number: 8761
+```
+
+
 
 维护新组件的ingress:
 
@@ -1594,6 +2097,8 @@ $ kubectl -n dev edit configmap devops-config
 ```
 
 部署k8s集群时，将eureka的集群地址通过参数的形式传递到pod内部，因此本地开发时，直接按照单点模式进行：
+
+修改 eureka/src/main/resources/application.yml
 
 ```yaml
 server:
@@ -1617,9 +2122,53 @@ spring:
     name: eureka-cluster
 ```
 
-提交项目：
+提交项目：创建develop分支，CICD部署开发环境
 
-创建develop分支，CICD部署开发环境
+ gitlab在luff-spring-cloud组下创建项目 eureka项目
+
+```bash
+[root@k8s-slave1 ~]# cd eureka/
+git init
+git remote add origin http://gitlab.luffy.com/luffy-spring-cloud/eureka.git
+git add .
+git commit -m "Initial commit"
+git push -u origin master
+git checkout -b develop
+git push -u origin develop
+```
+
+
+
+jenkins 创建 eureka 项目 复制 springboot-demo项目，
+
+修改git仓库地址http://gitlab.luffy.com/luffy-spring-cloud/eureka.git
+
+部署成功后查看
+
+```bash
+[root@k8s-master ~]# kubectl -n dev get po
+NAME               READY   STATUS    RESTARTS   AGE
+eureka-cluster-0   1/1     Running   2          5m53s
+eureka-cluster-1   1/1     Running   3          5m50s
+eureka-cluster-2   1/1     Running   0          5m47s
+[root@k8s-master ~]# kubectl -n dev get ing
+NAME              CLASS    HOSTS                      ADDRESS   PORTS   AGE
+eureka-cluster    <none>   eureka.luffy.com                     80      6m1s
+myblog            <none>   blog-dev.luffy.com                   80      2d1h
+springboot-demo   <none>   springboot-dev.luffy.com             80      20h
+# vi /etc/hosts
+10.211.55.25 eureka.luffy.com
+
+# 浏览器访问http://eureka.luffy.com/。 admin。admin 登录查看
+
+# 释放资源
+[root@k8s-master ~]# kubectl -n dev get sts
+NAME             READY   AGE
+eureka-cluster   1/3     8m10s
+[root@k8s-master ~]# kubectl -n dev delete sts eureka-cluster
+```
+
+
 
 
 
@@ -1661,6 +2210,12 @@ https://spring.io/projects/spring-cloud#overview
 https://docs.spring.io/spring-cloud-netflix/docs/3.0.3/reference/html/
 
 ##### [新建项目](http://49.7.203.222:3000/#/spring-cloud/register-center?id=新建项目)
+
+> Group com.luffy
+>
+> Group: eureka
+>
+> 
 
 ![img](9Spring Cloud微服务项目交付.assets/new-eureka-20221018080750087.jpg)
 
@@ -2134,12 +2689,18 @@ $ kubectl -n spring exec  -ti nginx-statefulset-0 sh
 
 ```xml
 <finalName>${project.artifactId}</finalName>
-Dockerfile
+```
+
+`Dockerfile`
+```
 FROM openjdk:8-jdk-alpine
 ADD target/eureka.jar app.jar
 ENV JAVA_OPTS=""
 CMD [ "sh", "-c", "java $JAVA_OPTS -jar /app.jar" ]
-Jenkinsfile
+```
+
+`Jenkinsfile`
+```
 @Library('luffy-devops') _
 
 pipeline {
@@ -2227,7 +2788,10 @@ pipeline {
         }
     }
 }
-sonar-project.properties
+```
+
+`sonar-project.properties`
+```
 sonar.projectKey=eureka-cluster
 sonar.projectName=eureka-cluster
 # if you want disabled the DTD verification for a proxy problem for example, true by default
