@@ -141,8 +141,8 @@ $ istioctl manifest generate --set profile=demo | kubectl delete -f -
 
 ###### [资源清单](http://49.7.203.222:3000/#/istio/get-started?id=资源清单)
 
-```
 front-tomcat-dpl-v1.yaml
+```
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,7 +166,10 @@ spec:
       containers:
       - image: consol/tomcat-7.0:latest
         name: front-tomcat
+```
+
 bill-service-dpl-v1.yaml
+```
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -191,7 +194,10 @@ spec:
       - image: nginx:alpine
         name: bill-service
         command: ["/bin/sh", "-c", "echo 'this is bill-service-v1'>/usr/share/nginx/html/index.html;nginx -g 'daemon off;'"]
+```
+
 bill-service-svc.yaml
+```
 apiVersion: v1
 kind: Service
 metadata:
@@ -218,6 +224,7 @@ $ kubectl apply -f front-tomcat-dpl-v1.yaml
 $ kubectl apply -f bill-service-dpl-v1.yaml
 $ kubectl apply -f bill-service-svc.yaml
 
+$ kubectl -n istio-demo get po -owide
 $ kubectl -n istio-demo exec front-tomcat-v1-548b46d488-r7wv8 -- curl -s bill-service:9999
 this is bill-service-v1
 ```
@@ -287,8 +294,8 @@ $ istioctl kube-inject -f front-tomcat-dpl-v1.yaml|kubectl apply -f -
 
 两个新的资源类型：`VirtualService`和`DestinationRule`
 
-```
 bill-service-destnation-rule.yaml
+```
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
@@ -303,7 +310,10 @@ spec:
   - name: v2
     labels:
       version: v2
+```
+
 bill-service-virtualservice.yaml
+```
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -395,7 +405,10 @@ $ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy
 $ docker run -d --name envoy -v `pwd`/envoy.yaml:/etc/envoy/envoy.yaml -p 10000:10000 envoyproxy/envoy-alpine:v1.15.2
 
 $ curl localhost:10000
+```
+
 envoy.yaml
+```yaml
 admin:
   access_log_path: /tmp/admin_access.log
   address:
