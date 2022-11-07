@@ -141,8 +141,9 @@ $ istioctl manifest generate --set profile=demo | kubectl delete -f -
 
 ###### [资源清单](http://49.7.203.222:3000/#/istio/get-started?id=资源清单)
 
-front-tomcat-dpl-v1.yaml
+
 ```
+cat > front-tomcat-dpl-v1.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -166,10 +167,12 @@ spec:
       containers:
       - image: consol/tomcat-7.0:latest
         name: front-tomcat
+EOF
 ```
 
-bill-service-dpl-v1.yaml
+
 ```
+cat > bill-service-dpl-v1.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -194,10 +197,12 @@ spec:
       - image: nginx:alpine
         name: bill-service
         command: ["/bin/sh", "-c", "echo 'this is bill-service-v1'>/usr/share/nginx/html/index.html;nginx -g 'daemon off;'"]
+EOF
 ```
 
-bill-service-svc.yaml
+
 ```
+cat > bill-service-svc.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -214,18 +219,22 @@ spec:
   selector:
     service: bill-service
   type: ClusterIP
+EOF
 ```
 
 ###### [操作](http://49.7.203.222:3000/#/istio/get-started?id=操作)
 
 ```bash
-$ kubectl create namespace istio-demo
-$ kubectl apply -f front-tomcat-dpl-v1.yaml
-$ kubectl apply -f bill-service-dpl-v1.yaml
-$ kubectl apply -f bill-service-svc.yaml
+kubectl create namespace istio-demo
+kubectl apply -f front-tomcat-dpl-v1.yaml
+kubectl apply -f bill-service-dpl-v1.yaml
+kubectl apply -f bill-service-svc.yaml
 
-$ kubectl -n istio-demo get po -owide
-$ kubectl -n istio-demo exec front-tomcat-v1-548b46d488-r7wv8 -- curl -s bill-service:9999
+[root@k8s-master istio]# kubectl -n istio-demo get po
+NAME                               READY   STATUS    RESTARTS   AGE
+bill-service-v1-8665fd77d8-zdrrz   1/1     Running   0          6m18s
+front-tomcat-v1-59d9cc6b65-58tlp   1/1     Running   0          5m57s
+[root@k8s-master istio]# kubectl -n istio-demo exec front-tomcat-v1-59d9cc6b65-58tlp -- curl -s bill-service:9999
 this is bill-service-v1
 ```
 
@@ -242,6 +251,7 @@ this is bill-service-v1
 新增`bill-service-dpl-v2.yaml`
 
 ```yaml
+cat > bill-service-dpl-v2.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -266,13 +276,22 @@ spec:
       - image: nginx:alpine
         name: bill-service
         command: ["/bin/sh", "-c", "echo 'hello, this is bill-service-v2'>/usr/share/nginx/html/index.html;nginx -g 'daemon off;'"]
+EOF
 ```
 
 此时，访问规则会按照v1和v2的pod各50%的流量分配。
 
 ```bash
 $ kubectl apply -f bill-service-dpl-v2.yaml
-$ kubectl -n istio-demo exec front-tomcat-v1-548b46d488-r7wv8 --  curl -s bill-service:9999
+[root@k8s-master istio]# kubectl -n istio-demo get po
+NAME                               READY   STATUS    RESTARTS   AGE
+bill-service-v1-8665fd77d8-zdrrz   1/1     Running   0          18m
+bill-service-v2-857d56bb46-wqhl6   1/1     Running   0          14s
+front-tomcat-v1-59d9cc6b65-58tlp   1/1     Running   0          18m
+[root@k8s-master istio]# kubectl -n istio-demo exec front-tomcat-v1-59d9cc6b65-58tlp -- curl -s bill-service:9999
+this is bill-service-v1
+[root@k8s-master istio]# kubectl -n istio-demo exec front-tomcat-v1-59d9cc6b65-58tlp -- curl -s bill-service:9999
+hello, this is bill-service-v2
 ```
 
 ![img](10基于Istio实现微服务治理.assets/cj-2-1.jpg)
@@ -282,9 +301,9 @@ $ kubectl -n istio-demo exec front-tomcat-v1-548b46d488-r7wv8 --  curl -s bill-s
 注入：
 
 ```bash
-$ istioctl kube-inject -f bill-service-dpl-v1.yaml|kubectl apply -f -
-$ istioctl kube-inject -f bill-service-dpl-v2.yaml|kubectl apply -f -
-$ istioctl kube-inject -f front-tomcat-dpl-v1.yaml|kubectl apply -f -
+istioctl kube-inject -f bill-service-dpl-v1.yaml|kubectl apply -f -
+istioctl kube-inject -f bill-service-dpl-v2.yaml|kubectl apply -f -
+istioctl kube-inject -f front-tomcat-dpl-v1.yaml|kubectl apply -f -
 ```
 
 若想实现上述需求，需要解决如下两个问题：
@@ -296,6 +315,7 @@ $ istioctl kube-inject -f front-tomcat-dpl-v1.yaml|kubectl apply -f -
 
 bill-service-destnation-rule.yaml
 ```
+cat > bill-service-destnation-rule.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
@@ -310,10 +330,12 @@ spec:
   - name: v2
     labels:
       version: v2
+EOF
 ```
 
 bill-service-virtualservice.yaml
 ```
+cat > bill-service-virtualservice.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -333,6 +355,7 @@ spec:
         host: bill-service
         subset: v2
       weight: 10
+EOF
 ```
 
 使用client验证流量分配是否生效。
@@ -340,7 +363,17 @@ spec:
 ```bash
 $ kubectl apply -f bill-service-virtualservice.yaml
 $ kubectl apply -f bill-service-destnation-rule.yaml
-$ kubectl -n istio-demo exec front-tomcat-v1-78cf497978-ltxpf -c front-tomcat -- curl -s bill-service:9999
+[root@k8s-master istio]# kubectl -n istio-demo get po
+NAME                               READY   STATUS    RESTARTS   AGE
+bill-service-v1-5f48d5f4d6-cbcrc   2/2     Running   0          3m57s
+bill-service-v2-84f9464779-dn9td   2/2     Running   0          3m57s
+front-tomcat-v1-78fbb476d4-fpqnd   2/2     Running   0          3m56s
+# kubectl -n istio-demo exec front-tomcat-v1-78fbb476d4-fpqnd -c front-tomcat -- curl -s bill-service:9999
+this is bill-service-v1
+# kubectl -n istio-demo exec front-tomcat-v1-78fbb476d4-fpqnd -c front-tomcat -- curl -s bill-service:9999
+this is bill-service-v1
+# kubectl -n istio-demo exec front-tomcat-v1-78fbb476d4-fpqnd -c front-tomcat -- curl -s bill-service:9999
+this is bill-service-v1
 ```
 
 
@@ -377,7 +410,12 @@ pod被istio注入后，被纳入到服务网格中，每个pod都会添加一个
 ![img](10基于Istio实现微服务治理.assets/ll-3.jpg)
 
 ```bash
-$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy bash
+[root@k8s-master istio]# kubectl -n istio-demo get po
+NAME                               READY   STATUS    RESTARTS   AGE
+bill-service-v1-5f48d5f4d6-cbcrc   2/2     Running   0          119m
+bill-service-v2-84f9464779-dn9td   2/2     Running   0          119m
+front-tomcat-v1-78fbb476d4-fpqnd   2/2     Running   0          119m
+# kubectl -n istio-demo exec -ti front-tomcat-v1-78fbb476d4-fpqnd -c istio-proxy -- bash
 # ps aux
 ```
 
@@ -409,6 +447,7 @@ $ curl localhost:10000
 
 envoy.yaml
 ```yaml
+cat > envoy.yaml <<EOF
 admin:
   access_log_path: /tmp/admin_access.log
   address:
@@ -441,6 +480,7 @@ static_resources:
     type: STATIC
     lb_policy: ROUND_ROBIN
     hosts: [{ socket_address: { address: 10.103.211.217, port_value: 9999 }}]
+EOF
 ```
 
 脑补一下网络代理程序的流程，比如作为一个代理，首先要能获取请求流量，通常是采用监听端口的方式实现；其次拿到请求数据后需要对其做微处理，例如附加 `Header` 或校验某个 `Header` 字段的内容等，这里针对来源数据的层次不同，可以分为 `L3/L4/L7`，然后将请求转发出去；转发这里又可以衍生出如果后端是一个集群，需要从中挑选一台机器，如何挑选又涉及到负载均衡等。
@@ -518,7 +558,7 @@ Envoy 接收到请求后，会先走 `FilterChain`，通过各种 L3/L4/L7 Filte
 每个envoy进程启动的时候，会在`127.0.0.1`启动监听15000端口
 
 ```bash
-$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy bash
+$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy -- bash
 # netstat -nltp
 # curl localhost:15000/help
 # curl localhost:15000/config_dump
@@ -527,7 +567,7 @@ $ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy
 针对问题2：
 
 ```bash
-$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c front-tomcat bash
+$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c front-tomcat -- bash
 # curl bill-service:9999
 ```
 
@@ -653,7 +693,7 @@ Istio 给应用 Pod 注入的配置主要包括：
   ```
 
 ```bash
-$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy bash
+$ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy -- bash
 istio-proxy@front-tomcat-v1-78cf497978-ppwwk:/$ netstat -nltp
 Active Internet connections (only servers)
 Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
@@ -987,8 +1027,9 @@ $ istioctl pc cluster bill-service-v1-6c95ccb747-vwt2d.istio-demo  --fqdn "inbou
 
 ###### [资源清单](http://49.7.203.222:3000/#/istio/traffic-control?id=资源清单)
 
-```
 front-tomcat-service.yaml
+```
+cat > front-tomcat-service.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -1005,7 +1046,12 @@ spec:
   selector:
     app: front-tomcat
   type: ClusterIP
+EOF
+```
+
 front-tomcat-v2-dpl.yaml
+```
+cat > front-tomcat-v2-dpl.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1030,7 +1076,12 @@ spec:
       - image: consol/tomcat-7.0:latest
         name: front-tomcat
         command: ["/bin/sh", "-c", "echo 'hello tomcat version2'>/opt/tomcat/webapps/ROOT/index.html;/opt/tomcat/bin/deploy-and-run.sh;"]
+EOF
+```
+
 front-tomcat-virtualservice.yaml
+```
+cat > front-tomcat-virtualservice.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1065,9 +1116,23 @@ spec:
   - name: v2
     labels:
       version: v2
+EOF
+```
+
+```bash
 $ kubectl apply -f front-tomcat-service.yaml
 $ kubectl apply -f <(istioctl kube-inject -f front-tomcat-v2-dpl.yaml)
 $ kubectl apply -f front-tomcat-virtualservice.yaml
+
+[root@k8s-master istio]# kubectl -n istio-demo get po
+NAME                               READY   STATUS    RESTARTS   AGE
+bill-service-v1-5f48d5f4d6-cbcrc   2/2     Running   0          3h17m
+bill-service-v2-84f9464779-dn9td   2/2     Running   0          3h17m
+front-tomcat-v1-78fbb476d4-fpqnd   2/2     Running   0          3h17m
+front-tomcat-v2-6b5b6ff75f-2kshd   2/2     Running   0          31s
+# 多次访问验证
+[root@k8s-master istio]# kubectl -n istio-demo exec bill-service-v1-5f48d5f4d6-cbcrc -c bill-service -- curl -s front-tomcat:8080
+hello tomcat version2
 ```
 
 
@@ -1152,8 +1217,10 @@ $ kubectl -n istio-demo exec -ti front-tomcat-v1-78cf497978-ppwwk -c istio-proxy
 
 ##### [使用ingress来访问网格服务](http://49.7.203.222:3000/#/istio/visit-mesh-svc?id=使用ingress来访问网格服务)
 
-```
 front-tomcat-ingress.yaml
+
+```
+cat > front-tomcat-ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -1171,6 +1238,7 @@ spec:
             name: front-tomcat
             port:
               number: 8080
+EOF
 ```
 
 使用浏览器访问查看效果。
@@ -1187,8 +1255,10 @@ Ingress：对接ingress controller，实现外部流量进入集群内部，只�
 
 Istio `Gateway` 通过将 L4-L6 配置与 L7 配置分离的方式克服了 `Ingress` 的这些缺点。 `Gateway` 只用于配置 L4-L6 功能（例如，对外公开的端口，TLS 配置），所有主流的L7代理均以统一的方式实现了这些功能。 然后，通过在 `Gateway` 上绑定 `VirtualService` 的方式，可以使用标准的 Istio 规则来控制进入 `Gateway` 的 HTTP 和 TCP 流量。
 
-```
 front-tomcat-gateway.yaml
+
+```
+cat > front-tomcat-gateway.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
 metadata:
@@ -1204,7 +1274,27 @@ spec:
       protocol: HTTP
     hosts:
     - tomcat.istio-demo.com
+EOF
+
 ```
+
+
+
+```bash
+[root@k8s-master istio]# kubectl create -f front-tomcat-gateway.yaml
+# 选择标签是 istio=ingressgateway
+[root@k8s-master istio]# kubectl -n istio-system get po -l istio=ingressgateway
+NAME                                    READY   STATUS    RESTARTS   AGE
+istio-ingressgateway-77968dbd74-rrztz   1/1     Running   0          5h33m
+kubectl -n istio-system get po
+kubectl -n ingress-nginx get po
+kubectl -n istio-system get po -l istio=ingressgateway
+
+```
+
+
+
+
 
 效果是在Istio的ingress网关上加了一条规则，允许``tomcat.istio-demo.com` 的外部http流量进入到网格中，但是只是接受访问和流量输入，当流量到达这个网关时，它还不知道发送到哪里去。
 
@@ -1212,8 +1302,10 @@ spec:
 
 要为进入上面的 Gateway 的流量配置相应的路由，必须为同一个 host 定义一个 `VirtualService`，并使用配置中的 `gateways` 字段绑定到前面定义的 `Gateway` 上
 
-```
 front-tomcat-gateway-virtualservice.yaml
+
+```
+cat > front-tomcat-gateway-virtualservice.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1235,6 +1327,7 @@ spec:
         host: front-tomcat
         subset: v2
       weight: 10
+EOF
 ```
 
 该网关列表指定，只有通过我们指定的网关 `front-tomcat-gateway` 的流量是允许的。所有其他外部请求将被拒绝，并返回 404 响应。
@@ -1242,8 +1335,18 @@ spec:
 > 请注意，在此配置中，来自网格中其他服务的内部请求不受这些规则约束
 
 ```bash
-$ kubectl apply -f front-tomcat-gateway-virtualservice.yaml
 $ kubectl apply -f front-tomcat-gateway.yaml
+$ kubectl apply -f front-tomcat-gateway-virtualservice.yaml
+
+[root@k8s-master istio]# kubectl -n istio-system get svc
+NAME                   TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      AGE
+istio-egressgateway    ClusterIP      10.111.145.113   <none>        80/TCP,443/TCP                                                               5h52m
+istio-ingressgateway   LoadBalancer   10.105.26.176    <pending>     15021:31943/TCP,80:32726/TCP,443:30477/TCP,31400:32683/TCP,15443:32727/TCP   5h52m
+istiod                 ClusterIP      10.103.195.150   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP                                        5h53m
+[root@k8s-master istio]# # tomcat.istio-demo -> 10.105.26.176:80,10.211.55.25:32726
+vi /etc/hosts
+10.211.55.25 tomcat.istio-demo.com
+浏览器访问http://tomcat.istio-demo.com:32726
 ```
 
 模拟访问：
@@ -1263,8 +1366,11 @@ $ curl  -HHost:tomcat.istio-demo.com 172.21.51.67:30779/
 如何实现不加端口访问网格内服务？
 
 ```bash
-# 在一台80端口未被占用的机器中，如k8s-slave1,ip为172.21.51.67
-$ cat nginx-istio-dpl.yaml
+[root@k8s-master istio]# kubectl get po -owide -n ingress-nginx
+NAME                                        READY   STATUS    RESTARTS   AGE   IP             NODE         NOMINATED NODE   READINESS GATES
+nginx-ingress-controller-55dd6f8d7b-2psbn   1/1     Running   52         17d   10.211.55.25   k8s-master   <none>           <none>
+# 在一台80端口未被占用的机器中，如k8s-slave1,ip为10.211.55.26
+cat > nginx-istio-dpl.yaml <<\EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1299,7 +1405,9 @@ spec:
           defaultMode: 420
           name: nginx-istio
         name: nginx-istio
-$ cat nginx-istio-configmap.yaml
+EOF
+
+cat > nginx-istio-configmap.yaml <<\EOF
 apiVersion: v1
 data:
   default.conf: |
@@ -1322,7 +1430,7 @@ data:
     }
   tomcat.conf: |
     upstream tomcat-istiodemo {
-      server 10.108.185.207:80;
+      server 10.105.26.176:80;  # kubectl -n istio-system get svc换成istio-ingressgateway的地址
     }
     server {
         listen       80;
@@ -1341,14 +1449,34 @@ kind: ConfigMap
 metadata:
   name: nginx-istio
   namespace: istio-system
+EOF
 
-$ nginx -s reload
+
+[root@k8s-master istio]# kubectl -n istio-system get svc
+NAME                   TYPE           CLUSTER-IP       EXTERNAL-IP   PORT(S)                                                                      AGE
+istio-egressgateway    ClusterIP      10.111.145.113   <none>        80/TCP,443/TCP                                                               6h8m
+istio-ingressgateway   LoadBalancer   10.105.26.176    <pending>     15021:31943/TCP,80:32726/TCP,443:30477/TCP,31400:32683/TCP,15443:32727/TCP   6h8m
+istiod                 ClusterIP      10.103.195.150   <none>        15010/TCP,15012/TCP,443/TCP,15014/TCP                                        6h10m   
+$ kubectl label node k8s-slave2 istio-nginx=true
+# kubectl label node k8s-slave2 istio-nginx-  #删除掉标签
+# kubectl label node k8s-slave1 istio-nginx=true
+
+$ kubectl apply -f nginx-istio-configmap.yaml
+$ kubectl apply -f nginx-istio-dpl.yaml
+[root@k8s-master istio]# kubectl -n istio-system get po -owide
+NAME                                    READY   STATUS    RESTARTS   AGE    IP             NODE         NOMINATED NODE   READINESS GATES
+istio-egressgateway-66fdd867f4-7fgb4    1/1     Running   0          6h5m   10.244.1.15    k8s-slave1  
+istio-ingressgateway-77968dbd74-rrztz   1/1     Running   0          6h5m   10.244.1.14    k8s-slave1   
+istiod-699b647f8b-llb85                 1/1     Running   0          6h6m   10.244.1.13    k8s-slave1   <none>           <none>
+nginx-istio-68cfd787f7-tw42c            1/1     Running   0          22s    10.211.55.27   k8s-slave2   
+# kubectl -n istio-system exec -ti nginx-istio-68cfd787f7-tw42c -- sh
+/ # nginx -s reload
 ```
 
 本地配置hosts
 
 ```bash
-172.21.51.55 tomcat.istio-demo.com
+10.211.55.26 tomcat.istio-demo.com
 ```
 
 直接访问`http://tomcat.istio-demo.com` 即可实现外部域名访问到网格内部服务
@@ -1365,7 +1493,7 @@ $ nginx -s reload
 
 ```bash
 $ kubectl create namespace bookinfo
-$ kubectl -n bookinfo create -f samples/bookinfo/platform/kube/bookinfo.yaml 
+$ kubectl -n bookinfo create -f istio-1.13.2/samples/bookinfo/platform/kube/bookinfo.yaml 
 $ kubectl -n bookinfo get po 
 NAME                                  READY   STATUS    RESTARTS   AGE
 details-v1-5974b67c8-wclnd            1/1     Running   0          34s
@@ -1397,8 +1525,10 @@ Bookinfo 是一个异构应用，几个微服务是由不同的语言编写的�
 
 使用ingress访问productpage服务：
 
-```
 ingress-productpage.yaml
+
+```
+cat > ingress-productpage.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -1412,11 +1542,28 @@ spec:
       - path: /
         pathType: Prefix
         backend:
-          service: 
+          service:
             name: productpage
             port:
               number: 9080
+EOF
 ```
+
+
+
+```bash
+[root@k8s-master ~]# mkdir bookinfo
+[root@k8s-master ~]# cd bookinfo/
+[root@k8s-master bookinfo]# kubectl apply -f ingress-productpage.yaml
+[root@k8s-master bookinfo]# curl -HHost:bookinfo.luffy.com 10.211.55.25
+# 宿主机配置 hosts  
+$ vi /etc/hosts
+10.211.55.25。bookinfo.luffy.com
+# 浏览器访问 http://bookinfo.luffy.com/productpage
+# 观察🌟🌟 的变化是 默认策略是轮询reviews 的三个版本
+```
+
+
 
 如何实现更细粒度的流量管控？
 
@@ -1424,13 +1571,13 @@ spec:
 
 ###### [如何注入sidecar容器](http://49.7.203.222:3000/#/istio/demo-show/inject?id=如何注入sidecar容器)
 
-1. 使用`istioctl kube-inject`
+1. 使用`istioctl kube-inject` 推荐\****
 
    ```bash
    $ kubectl -n bookinfo apply -f <(istioctl kube-inject -f samples/bookinfo/platform/kube/bookinfo.yaml)
    ```
 
-2. 为命名空间打label
+2. 为命名空间打label （二选一）
 
    ```bash
    # 给命名空间打标签，这样部署在该命名空间的服务会自动注入sidecar容器
@@ -1445,6 +1592,17 @@ $ kubectl -n bookinfo apply -f <(istioctl kube-inject -f samples/bookinfo/platfo
 
 ![img](10基于Istio实现微服务治理.assets/withistio.svg)
 
+```bash
+[root@k8s-master istio-1.13.2]# kubectl -n bookinfo get po
+NAME                              READY   STATUS    RESTARTS   AGE
+details-v1-bdc964765-n5qrs        2/2     Running   0          3m37s
+productpage-v1-7ff6d55f74-r55d2   2/2     Running   0          3m36s
+ratings-v1-5f57f5f6bf-48v9z       2/2     Running   0          3m37s
+reviews-v1-6cc86cdc44-69tfz       2/2     Running   0          3m37s
+reviews-v2-6597ffc5b5-kprch       2/2     Running   0          3m37s
+reviews-v3-764cb69d4b-6rdb4       2/2     Running   0          3m37s
+```
+
 
 
 ## [流量路由](http://49.7.203.222:3000/#/istio/demo-show/traffic-control)
@@ -1456,7 +1614,7 @@ $ kubectl -n bookinfo apply -f <(istioctl kube-inject -f samples/bookinfo/platfo
 ###### [ingress-gateway访问productpage](http://49.7.203.222:3000/#/istio/demo-show/traffic-control?id=ingress-gateway访问productpage)
 
 ```
-productpage-gateway.yaml
+cat > productpage-gateway.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
 metadata:
@@ -1472,7 +1630,9 @@ spec:
       protocol: HTTP
     hosts:
     - bookinfo.luffy.com
-productpage-virtualservice.yaml
+EOF
+ 
+cat > productpage-virtualservice.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1489,6 +1649,10 @@ spec:
         host: productpage
         port:
           number: 9080
+EOF
+
+kubectl apply -f productpage-gateway.yaml
+kubectl apply -f productpage-virtualservice.yaml
 ```
 
 配置nginx，使用域名80端口访问。
@@ -1496,7 +1660,7 @@ spec:
 ```bash
   bookinfo-productpage.conf: |
     upstream bookinfo-productpage {
-      server 10.108.185.207:80;
+      server 10.108.185.207:80; #kubectl -n istio-system get svc更换成istio-ingressgateway的地址
     }
     server {
         listen       80;
@@ -1513,6 +1677,45 @@ spec:
     }
 ```
 
+
+
+```basg
+[root@k8s-master bookinfo]# kubectl -n istio-system get cm
+nginx-istio                           2      72s
+[root@k8s-master bookinfo]# kubectl -n istio-system edit cm nginx-istio #在default.conf:{..}后添加 
+  bookinfo-productpage.conf: |
+    upstream bookinfo-productpage {
+      server 10.105.26.176:80;
+    }
+    server {
+        listen       80;
+        listen  [::]:80;
+        server_name  bookinfo.luffy.com;
+
+        location / {
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_http_version 1.1;
+            proxy_pass http://bookinfo-productpage;
+        }
+    }
+
+# 查看文件一更新
+# kubectl -n istio-system exec nginx-istio-68cfd787f7-xwfqx  -- ls /etc/nginx/conf.d/
+bookinfo-productpage.conf
+default.conf
+tomcat.conf
+# kubectl -n istio-system exec nginx-istio-68cfd787f7-xwfqx  -- nginx -s reload
+2022/11/07 11:07:23 [notice] 32#32: signal process started
+# 宿主机修改hosts
+vi /etc/hosts
+10.211.55.26 bookinfo.luffy.com
+# 浏览器访问http://bookinfo.luffy.com/productpage
+```
+
+
+
 ![img](10基于Istio实现微服务治理.assets/withistio-20221018081923123.svg)
 
 ###### [权重路由](http://49.7.203.222:3000/#/istio/demo-show/traffic-control?id=权重路由)
@@ -1520,7 +1723,7 @@ spec:
 只想访问`reviews-v3`
 
 ```bash
-$ cat virtual-service-reviews-v3.yaml
+cat > virtual-service-reviews-v3.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1534,8 +1737,9 @@ spec:
     - destination:
         host: reviews
         subset: v3
+EOF
 
-$ cat destination-rule-reviews.yaml
+cat > destination-rule-reviews.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
@@ -1556,10 +1760,11 @@ spec:
   - name: v3
     labels:
       version: v3
+EOF
 
-$ kubectl apply -f virtual-service-reviews-v3.yaml
-
-# 访问productpage测试
+kubectl apply -f virtual-service-reviews-v3.yaml
+kubectl apply -f destination-rule-reviews.yaml
+# 访问productpage测试  http://bookinfo.luffy.com/productpage
 ```
 
 实现如下流量分配：
@@ -1568,7 +1773,10 @@ $ kubectl apply -f virtual-service-reviews-v3.yaml
 0% -> reivews-v1
 10% -> reviews-v2
 90%  -> reviews-v3
-$ cat virtual-service-reviews-90-10.yaml
+```
+
+```
+cat > virtual-service-reviews-90-10.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1587,12 +1795,57 @@ spec:
         host: reviews
         subset: v3
       weight: 90
-
-$ kubectl apply -f virtual-service-reviews-90-10.yaml
+EOF
+kubectl apply -f virtual-service-reviews-90-10.yaml
 
 # 假如v2版本的副本数扩容为3，v2版本的流量会如何分配？  会不会变成30%？
 $ kubectl -n bookinfo scale deploy reviews-v2 --replicas=3
-#  istioctl pc route productpage-v1-667f4495b5-kb5qv.bookinfo --name 9080 -ojson
+[root@k8s-master istio]# kubectl -n bookinfo get po
+NAME                              READY   STATUS    RESTARTS   AGE
+details-v1-bdc964765-n5qrs        2/2     Running   0          7h57m
+productpage-v1-7ff6d55f74-r55d2   2/2     Running   0          7h57m
+ratings-v1-5f57f5f6bf-48v9z       2/2     Running   0          7h57m
+reviews-v1-6cc86cdc44-69tfz       2/2     Running   0          7h57m
+reviews-v2-6597ffc5b5-kprch       2/2     Running   0          7h57m
+reviews-v2-6597ffc5b5-n4ptz       2/2     Running   0          25s
+reviews-v2-6597ffc5b5-rs62g       2/2     Running   0          25s
+reviews-v3-764cb69d4b-6rdb4       2/2     Running   0          7h57m
+# istioctl pc route productpage-v1-7ff6d55f74-r55d2.bookinfo --name 9080 -ojson
+....
+           {
+                "name": "reviews.bookinfo.svc.cluster.local:9080",
+                "domains": [
+                    "reviews.bookinfo.svc.cluster.local",
+                    "reviews.bookinfo.svc.cluster.local:9080",
+                    "reviews",
+                    "reviews:9080",
+                    "reviews.bookinfo.svc",
+                    "reviews.bookinfo.svc:9080",
+                    "reviews.bookinfo",
+                    "reviews.bookinfo:9080",
+                    "10.111.120.41",
+                    "10.111.120.41:9080"
+                ],
+                "routes": [
+                    {
+                        "match": {
+                            "prefix": "/"
+                        },
+                        "route": {
+                            "weightedClusters": {
+                                "clusters": [
+                                    {
+                                        "name": "outbound|9080|v2|reviews.bookinfo.svc.cluster.local",
+                                        "weight": 10
+                                    },
+                                    {
+                                        "name": "outbound|9080|v3|reviews.bookinfo.svc.cluster.local",
+                                        "weight": 90
+                                    }
+                                ]
+                            },
+....
+结论： 还是一样
 ```
 
 ###### [访问路径路由](http://49.7.203.222:3000/#/istio/demo-show/traffic-control?id=访问路径路由)
@@ -1602,9 +1855,13 @@ $ kubectl -n bookinfo scale deploy reviews-v2 --replicas=3
 ![img](10基于Istio实现微服务治理.assets/ll-4.jpg)
 
 ```bash
+[root@k8s-master istio]# kubectl -n bookinfo get vs
+NAME          GATEWAYS                  HOSTS                    AGE
+reviews                                 ["reviews"]              18m
+vs-bookinfo   ["productpage-gateway"]   ["bookinfo.luffy.com"]   8h
+[root@k8s-master istio]# kubectl -n bookinfo describe vs vs-bookinfo
 # 修改外部流量进入网格后的规则
-
-$ cat virtualservice-bookinfo-with-uri-path.yaml
+cat > virtualservice-bookinfo-with-uri-path.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1642,21 +1899,23 @@ spec:
         host: productpage
         port:
           number: 9080
+EOF
+kubectl apply -f virtualservice-bookinfo-with-uri-path.yaml
 ```
 
 访问：
 
 ```
-http://bookinfo.com/productpage
-http://bookinfo.com/ratings/1
+http://bookinfo.luffy.com/productpage
+http://bookinfo.luffy.com/ratings/1
 ```
 
 实际的访问对应为：
 
 ```bash
-www.bookinfo.com/abc  -> productpage:8090/abc
-www.bookinfo.com/ratings  ->  ratings:9080/ratings
-www.bookinfo.com/reviews  ->  reviews:9080/reviews
+www.bookinfo.luffy.com/abc  -> productpage:8090/abc
+www.bookinfo.luffy.com/ratings  ->  ratings:9080/ratings
+www.bookinfo.luffy.com/reviews  ->  reviews:9080/reviews
 ```
 
 `virtualservice`的配置中并未指定service的port端口，转发同样可以生效？
@@ -1669,6 +1928,10 @@ www.bookinfo.com/reviews  ->  reviews:9080/reviews
 
 ```bash
 www.bookinfo.com/rate  -> ratings:8090/ratings
+```
+
+```bash
+
 ...
   - name: ratings-route
     match:
@@ -1680,6 +1943,10 @@ www.bookinfo.com/rate  -> ratings:8090/ratings
     - destination:
         host: ratings
 ...
+
+
+kubectl -n bookinfo edit vs vs-bookinfo
+# 浏览器访问 http://bookinfo.luffy.com/rate/1
 ```
 
 ###### [DestinationRule 转发策略](http://49.7.203.222:3000/#/istio/demo-show/traffic-control?id=destinationrule-转发策略)
@@ -1731,7 +1998,7 @@ https://istio.io/latest/docs/tasks/traffic-management/ingress/secure-ingress/
 ###### [header头路由](http://49.7.203.222:3000/#/istio/demo-show/traffic-control?id=header头路由)
 
 ```bash
-$ cat virtual-service-reviews-header.yaml
+cat > virtual-service-reviews-header.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -1753,7 +2020,12 @@ spec:
     - destination:
         host: reviews
         subset: v2
-$ kubectl apply -f virtual-service-reviews-header.yaml
+EOF
+kubectl apply -f virtual-service-reviews-header.yaml
+
+# 浏览器访问http://bookinfo.luffy.com/productpage  始终是黑星星
+# 点击登录 账号luffy 密码随机1 这样header头带有luffy  登录之后就是红星
+
 
 # https://github.com/nocalhost/bookinfo-productpage/blob/main/productpage.py
 # 刷新观察http://bookinfo.com/productpage
@@ -1781,7 +2053,7 @@ https://istio.io/latest/docs/reference/config/networking/virtual-service/#HTTPMa
 
 ```bash
 # 准备httpbin v1
-$ cat httpbin-v1.yaml
+cat > httpbin-v1.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1804,8 +2076,9 @@ spec:
         imagePullPolicy: IfNotPresent
         name: httpbin
         command: ["gunicorn", "--access-logfile", "-", "-b", "0.0.0.0:80", "httpbin:app"]
-        
-$ istioctl kube-inject -f httpbin-v1.yaml | kubectl create -f -
+EOF
+istioctl kube-inject -f httpbin-v1.yaml | kubectl create -f -
+
 $ curl $(kubectl -n bookinfo get po  -l version=v1,app=httpbin -ojsonpath='{.items[0].status.podIP}')/headers
 {
   "headers": {
@@ -1820,7 +2093,7 @@ $ curl $(kubectl -n bookinfo get po  -l version=v1,app=httpbin -ojsonpath='{.ite
 }
 
 # 准备httpbin v2
-$ cat httpbin-v2.yaml
+cat > httpbin-v2.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1843,11 +2116,11 @@ spec:
         imagePullPolicy: IfNotPresent
         name: httpbin
         command: ["gunicorn", "--access-logfile", "-", "-b", "0.0.0.0:80", "httpbin:app"]
-        
-$ istioctl kube-inject -f httpbin-v2.yaml | kubectl create -f -
+EOF
+istioctl kube-inject -f httpbin-v2.yaml | kubectl create -f -
 
 # Service文件
-$ cat httpbin-svc.yaml
+cat > httpbin-svc.yaml <<EOF
 apiVersion: v1
 kind: Service
 metadata:
@@ -1862,17 +2135,39 @@ spec:
     targetPort: 80
   selector:
     app: httpbin
+EOF
+kubectl apply -f httpbin-svc.yaml
 
-$ kubectl apply -f httpbin-svc.yaml
+
+[root@k8s-master istio]# kubectl -n bookinfo get po -owide
+NAME                              READY   STATUS            RESTARTS   AGE     IP                NOMINATED NODE   READINESS GATES
+httpbin-v1-54d58c7b99-9hhsg       0/2     Running   0          2m22s   10.244.2.226  
+httpbin-v2-6f8b9757c-c9rgz        0/2     Running   0          2m11s   10.244.2.227  
+[root@k8s-master istio]# curl 10.244.2.226/headers
+{
+  "headers": {
+    "Accept": "*/*",
+    "Host": "10.244.2.226",
+    "User-Agent": "curl/7.29.0",
+    "X-B3-Sampled": "1",
+    "X-B3-Spanid": "6d4e910e002a225e",
+    "X-B3-Traceid": "5b31995671c320ad6d4e910e002a225e"
+  }
+} 
+[root@k8s-master istio]# kubectl -n bookinfo logs -f httpbin-v1-54d58c7b99-9hhsg #查看访问日志
+[2022-11-07 12:10:48 +0000] [1] [INFO] Starting gunicorn 19.9.0
+[2022-11-07 12:10:48 +0000] [1] [INFO] Listening at: http://0.0.0.0:80 (1)
+[2022-11-07 12:10:48 +0000] [1] [INFO] Using worker: sync
+[2022-11-07 12:10:48 +0000] [9] [INFO] Booting worker with pid: 9
+127.0.0.6 - - [07/Nov/2022:12:12:03 +0000] "GET /headers HTTP/1.1" 200 229 "-" "curl/7.29.0"
 
 # 使用www.bookinfo.com/httpbin访问,因此直接修改bookinfo这个virtualservice即可
-$ kubectl -n bookinfo get vs
-NAME                   GATEWAYS                HOSTS               
-bookinfo               [bookinfo-gateway]      [bookinfo.com]       
-gateway-front-tomcat   [productpage-gateway]   [bookinfo.luffy.com]
-reviews                                        [reviews]     
-$ kubectl -n bookinfo edit vs bookinfo
-#添加httpbin的规则
+[root@k8s-master istio]# kubectl -n bookinfo get vs
+NAME          GATEWAYS                  HOSTS                    AGE
+reviews                                 ["reviews"]              75m
+vs-bookinfo   ["productpage-gateway"]   ["bookinfo.luffy.com"]   8h
+$ kubectl -n bookinfo edit vs vs-bookinfo
+#添加httpbin的规则  访问前缀http://bookinfo.luffy.com/httpbin 流量走向 httpbin-v1容器上
 ...
   - match:
     - uri:
@@ -1886,7 +2181,7 @@ $ kubectl -n bookinfo edit vs bookinfo
         subset: v1
 ...
 # 创建gateway和virtualservice,由于都是使用http请求，因此，直接
-$ cat httpbin-destinationRule.yaml
+cat > httpbin-destinationRule.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: DestinationRule
 metadata:
@@ -1901,12 +2196,16 @@ spec:
   - name: v2
     labels:
       version: v2
-$ kubectl apply -f httpbin-destinationRule.yaml
+EOF
+kubectl apply -f httpbin-destinationRule.yaml
 
-# 访问http://www.bookinfo.com/httpbin/headers，查看日志
+# 访问http://www.bookinfo.luffy.com/httpbin/headers，查看日志 # not fount是缓存的原因
+# http://bookinfo.luffy.com/httpbin 可以查看到
+# 可以查看到访问日志
+[root@k8s-master istio]# kubectl -n bookinfo logs httpbin-v1-54d58c7b99-9hhsg
 
 # 为httpbin-v1添加mirror设置，mirror点为httpbin-v2
-$ kubectl -n bookinfo edit vs bookinfo
+$ kubectl -n bookinfo edit vs vs-bookinfo
 ...
   - match:
     - uri:
@@ -1923,6 +2222,16 @@ $ kubectl -n bookinfo edit vs bookinfo
       subset: v2
     mirror_percent: 100
 ...
+---参数说明
+    mirror_percent: 100   #比例100%
+    
+# 监测 v2的日志。浏览器去访问v1页面 http://bookinfo.luffy.com/httpbin/headers
+[root@k8s-master istio]# kubectl -n bookinfo logs -f httpbin-v2-6f8b9757c-c9rgz
+[2022-11-07 12:11:02 +0000] [1] [INFO] Starting gunicorn 19.9.0
+[2022-11-07 12:11:02 +0000] [1] [INFO] Listening at: http://0.0.0.0:80 (1)
+[2022-11-07 12:11:02 +0000] [1] [INFO] Using worker: sync
+[2022-11-07 12:11:02 +0000] [9] [INFO] Booting worker with pid: 9
+127.0.0.6 - - [07/Nov/2022:12:53:29 +0000] "GET //headers HTTP/1.1" 200 1033 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36"  
 ```
 
 
@@ -1937,7 +2246,7 @@ $ kubectl -n bookinfo edit vs bookinfo
 
 ###### [实践](http://49.7.203.222:3000/#/istio/demo-show/circuit-breaker?id=实践)
 
-浏览器访问`http://www.bookinfo.com/httpbin/status/502`
+浏览器访问`http://www.bookinfo.luffy.com/httpbin/status/502`
 
 ```bash
 # 此时查看httpbin-v1的日志，显示一条状态码为502的日志
@@ -1948,7 +2257,7 @@ $ kubectl -n bookinfo logs -f httpbin-v1-5967569c54-sp874 -c istio-proxy
 我们为`httpbin`服务设置重试机制，这里设置如果服务在 2 秒内没有返回正确的返回值，就进行重试，重试的条件为返回码为`5xx`，重试 3 次。
 
 ```bash
-$ kubectl -n bookinfo edit vs bookinfo
+$ kubectl -n bookinfo edit vs vs-bookinfo
 ...
   - match:
     - uri:
@@ -1971,6 +2280,14 @@ $ kubectl -n bookinfo edit vs bookinfo
 ...
 
 # 再次查看httpbin-v1的日志，显示四条状态码为502的日志
+[root@k8s-master istio]# kubectl -n bookinfo logs -f httpbin-v1-54d58c7b99-9hhsg
+....
+
+127.0.0.6 - - [07/Nov/2022:13:04:10 +0000] "GET //status/502 HTTP/1.1" 502 0 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36"
+127.0.0.6 - - [07/Nov/2022:13:04:10 +0000] "GET //status/502 HTTP/1.1" 502 0 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36"
+127.0.0.6 - - [07/Nov/2022:13:04:11 +0000] "GET //status/502 HTTP/1.1" 502 0 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36"
+127.0.0.6 - - [07/Nov/2022:13:04:11 +0000] "GET //status/502 HTTP/1.1" 502 0 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/97.0.4692.71 Safari/537.36"
+
 ```
 
 
@@ -1999,7 +2316,7 @@ productpage --> reviews v2 --> ratings
 可以通过如下方式，为`ratings`服务注入2秒的延迟：
 
 ```bash
-$ cat virtualservice-ratings-2s-delay.yaml
+cat > virtualservice-ratings-2s-delay.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -2017,9 +2334,10 @@ spec:
     route:
     - destination:
         host: ratings
+EOF
+kubectl apply -f virtualservice-ratings-2s-delay.yaml
 
-$ kubectl apply -f virtualservice-ratings-2s-delay.yaml
-# 再次访问http://www.bookinfo.com/productpage，可以明显感觉2s的延迟
+# 再次访问http://bookinfo.luffy.com/productpage，可以明显感觉2s的延迟
 ```
 
 可以查看对应的envoy的配置：
@@ -2068,7 +2386,7 @@ productpage -（0.5秒超时）-> reviews v2 -（延迟2秒）-> ratings
                 -> details
 ```
 
-此时，如果使用非luffy用户，则会出现只延迟，不会失败的情况。
+此时，http://bookinfo.luffy.com/productpage 如果使用非luffy用户，则会出现只延迟，不会失败的情况。
 
 删除延迟：
 
@@ -2079,7 +2397,7 @@ $ kubectl -n bookinfo delete vs ratings
 ###### [状态码](http://49.7.203.222:3000/#/istio/demo-show/fault-injection?id=状态码)
 
 ```bash
-$ cat virtualservice-details-aborted.yaml
+cat > virtualservice-details-aborted.yaml <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -2097,10 +2415,10 @@ spec:
     route:
     - destination:
         host: details
+EOF
+kubectl apply -f virtualservice-details-aborted.yaml
 
-$ kubectl apply -f virtualservice-details-aborted.yaml
-
-# 再次刷新查看details的状态，查看productpage的日志
+# 再次刷新查看details的状态，http://bookinfo.luffy.com/productpage 查看productpage的日志
 $ kubectl -n bookinfo logs -f $(kubectl -n bookinfo get po -l app=productpage -ojsonpath='{.items[0].metadata.name}') -c istio-proxy
 [2020-11-09T09:00:16.020Z] "GET /details/0 HTTP/1.1" 500 FI "-" "-" 0 18 0 - "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.183 Safari/537.36" "f0387bb6-a445-922c-89ab-689dfbf548f8" "details:9080" "-" - - 10.111.67.169:9080 10.244.0.52:56552 - -
 ```
@@ -2118,34 +2436,49 @@ https://istio.io/latest/docs/ops/integrations
 1. Grafana
 
    ```bash
-   $ kubectl apply -f samples/addons/grafana.yaml
+   $ kubectl apply -f istio-1.13.2/samples/addons/grafana.yaml
    ```
 
 2. Jaeger
 
    ```bash
-   $ kubectl apply -f samples/addons/jaeger.yaml
+   $ kubectl apply -f istio-1.13.2/samples/addons/jaeger.yaml
    ```
 
 3. Kiali
 
    ```bash
    # 完善扩展组件地址：
-   $ kubectl apply -f samples/addons/kiali.yaml
+   $ kubectl apply -f istio-1.13.2/samples/addons/kiali.yaml
    ```
 
 4. Prometheus
 
    ```bash
-   $ kubectl apply -f samples/addons/prometheus.yaml
+   $ kubectl apply -f istio-1.13.2/samples/addons/prometheus.yaml
    ```
+
+```bash
+[root@k8s-master ~]# kubectl -n istio-system get po
+NAME                                    READY   STATUS              RESTARTS   AGE
+grafana-6c5dc6df7c-tc92t                0/1     ContainerCreating   0          62s
+istio-egressgateway-66fdd867f4-7fgb4    1/1     Running             0          13h
+istio-ingressgateway-77968dbd74-rrztz   1/1     Running             0          13h
+istiod-699b647f8b-llb85                 1/1     Running             0          13h
+jaeger-9dd685668-7vmnq                  1/1     Running             0          56s
+kiali-699f98c497-twdm6                  0/1     ContainerCreating   0          51s
+nginx-istio-68cfd787f7-xwfqx            1/1     Running             0          6h44m
+prometheus-699b7cc575-qrp2q             0/2     ContainerCreating   0          46s
+```
+
+
 
 ##### [prometheus](http://49.7.203.222:3000/#/istio/demo-show/observability?id=prometheus)
 
 Prometheus：
 
 ```bash
-$ cat prometheus-ingress.yaml
+cat > prometheus-ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -2163,8 +2496,8 @@ spec:
             name: prometheus
             port:
               number: 9090
-
-$ kubectl apply -f prometheus-ingress.yaml
+EOF
+kubectl apply -f prometheus-ingress.yaml
 ```
 
 查看默认添加的targets列表：
@@ -2176,12 +2509,35 @@ $ kubectl apply -f prometheus-ingress.yaml
 ```bash
 $ kubectl -n bookinfo get po -owide
 $ curl 10.244.0.53:15020/stats/prometheus
+[root@k8s-master ~]# kubectl -n bookinfo get po -owide
+NAME                              READY   STATUS    RESTARTS   AGE     IP             NODE         NOMINATED NODE   READINESS GATES
+details-v1-bdc964765-n5qrs        2/2     Running   0          12h     10.244.1.19    k8s-slave1   
+httpbin-v1-54d58c7b99-9hhsg       2/2     Running   0          3h54m   10.244.2.226   k8s-slave2   
+httpbin-v2-6f8b9757c-c9rgz        2/2     Running   0          3h54m   10.244.2.227   k8s-slave2   
+productpage-v1-7ff6d55f74-r55d2   2/2     Running   0          12h     10.244.1.21    k8s-slave1   
+[root@k8s-master ~]# kubectl -n bookinfo exec -ti httpbin-v1-54d58c7b99-9hhsg -c istio-proxy -- bash
+istio-proxy@httpbin-v1-54d58c7b99-9hhsg:/$ netstat -lntup
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 127.0.0.1:15004         0.0.0.0:*               LISTEN      1/pilot-agent
+tcp        0      0 0.0.0.0:15006           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:15006           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:15021           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:15021           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      -
+tcp        0      0 0.0.0.0:15090           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:15090           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 127.0.0.1:15000         0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:15001           0.0.0.0:*               LISTEN      17/envoy
+tcp        0      0 0.0.0.0:15001           0.0.0.0:*               LISTEN      17/envoy
+tcp6       0      0 :::15020                :::*                    LISTEN      1/pilot-agent
+istio-proxy@httpbin-v1-54d58c7b99-9hhsg:/$ curl localhost:15020/stats/prometheus
 ```
 
 对于这些监控指标采集的数据，可以在grafana中查看到。
 
 ```bash
-$ cat grafana-ingress.yaml
+cat > grafana-ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -2195,12 +2551,14 @@ spec:
       - path: /
         pathType: Prefix
         backend:
-          service: 
+          service:
             name: grafana
             port:
               number: 3000
+EOF
+kubectl apply -f grafana-ingress.yaml
 
-
+[root@k8s-master ~]# echo '10.211.55.25 bookinfo.luffy.com' >> /etc/hosts
 $ for i in $(seq 1 10000); do curl -s -o /dev/null "http://bookinfo.luffy.com/productpage"; done
 ```
 
@@ -2215,7 +2573,7 @@ istio-services-grafana-dashboards   3      7d1h
 ##### [jaeger](http://49.7.203.222:3000/#/istio/demo-show/observability?id=jaeger)
 
 ```bash
-$ cat jaeger-ingress.yaml
+cat > jaeger-ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -2229,12 +2587,12 @@ spec:
       - path: /
         pathType: Prefix
         backend:
-          service: 
+          service:
             name: tracing
             port:
               number: 80
-  
-$ kubectl apply -f jaeger-ingress.yaml
+EOF
+kubectl apply -f jaeger-ingress.yaml
 ```
 
 ##### [kiali](http://49.7.203.222:3000/#/istio/demo-show/observability?id=kiali)
@@ -2242,7 +2600,7 @@ $ kubectl apply -f jaeger-ingress.yaml
 kiali 是一个 可观测性分析服务
 
 ```bash
-$ cat kiali-ingress.yaml
+cat > kiali-ingress.yaml <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -2260,8 +2618,8 @@ spec:
             name: kiali
             port:
               number: 20001
-
-$ kubectl apply -f kiali-ingress.yaml
+EOF
+kubectl apply -f kiali-ingress.yaml
 ```
 
 集成了Prometheus、grafana、tracing、log、
@@ -2269,6 +2627,17 @@ $ kubectl apply -f kiali-ingress.yaml
 > https://istio.io/latest/docs/tasks/observability/kiali/
 >
 > https://kiali.io/documentation/latest/configuration/authentication/
+
+```bash
+[root@k8s-master ~]# kubectl -n istio-system get ing
+NAME         CLASS    HOSTS                  ADDRESS   PORTS   AGE
+grafana      <none>   grafana.istio.com                80      2m23s
+jaeger       <none>   jaeger.istio.com                 80      99s
+kiali        <none>   kiali.istio.com                  80      77s
+prometheus   <none>   prometheus.istio.com             80      3m57s
+```
+
+
 
 
 
