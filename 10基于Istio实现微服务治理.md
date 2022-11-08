@@ -2343,7 +2343,10 @@ kubectl apply -f virtualservice-ratings-2s-delay.yaml
 可以查看对应的envoy的配置：
 
 ```bash
-$ istioctl pc r ratings-v1-556cfbd589-89ml4.bookinfo --name 9080 -ojson
+[root@k8s-master kubesphere]# kubectl -n bookinfo get po
+NAME                              READY   STATUS    RESTARTS   AGE
+ratings-v1-5f57f5f6bf-48v9z       2/2     Running   0          18h
+$ istioctl pc r ratings-v1-5f57f5f6bf-48v9z.bookinfo --name 9080 -ojson
 ```
 
 此时的调用为:
@@ -2969,3 +2972,38 @@ Kubernetes则不同，它本身就是一个和开发语言无关的、通用的�
 - kubesphere
 
 https://kubesphere.com.cn/docs/quick-start/minimal-kubesphere-on-k8s/
+
+安装kubesphere
+
+```bash
+# 前提要有一个存储 是走的default声明的
+[root@k8s-master ~]# kubectl get sc
+NAME            PROVISIONER     RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION   AGE
+nfs (default)   luffy.com/nfs   Delete          Immediate           false                  18d
+
+mkdir kubesphere
+cd kubesphere
+wget https://github.com/kubesphere/ks-installer/releases/download/v3.3.1/kubesphere-installer.yaml
+wget https://github.com/kubesphere/ks-installer/releases/download/v3.3.1/cluster-configuration.yaml
+kubectl apply -f kubesphere-installer.yaml
+kubectl apply -f cluster-configuration.yaml
+
+
+
+[root@k8s-master kubesphere]# kubectl -n kubesphere-system get po
+NAME                           READY   STATUS              RESTARTS   AGE
+ks-installer-895b8994d-jnr66   0/1     ContainerCreating   0          107s
+[root@k8s-master kubesphere]# kubectl get crd
+[root@k8s-master ~]# kubectl -n kubesphere-system get po
+NAME                                     READY   STATUS              RESTARTS   AGE
+ks-apiserver-6cd95fb98f-kw7g5            1/1     Running   					 0          30m
+ks-console-7d9857b6c-ssl55               1/1     Running             1          30m
+ks-controller-manager-5958b94c9c-d7nfk   1/1     Running             1          30m
+ks-installer-895b8994d-nln2p             1/1     Running             1          33m
+[root@k8s-master ~]# kubectl -n kubesphere-system logs -f ks-installer-895b8994d-nln2p #查看启动过程
+[root@k8s-master ~]# kubectl get svc/ks-console -n kubesphere-system
+NAME         TYPE       CLUSTER-IP    EXTERNAL-IP   PORT(S)        AGE
+ks-console   NodePort   10.96.77.43   <none>        80:30880/TCP   37m
+# 浏览器访问10.211.55.25:30880 使用默认帐户和密码 (admin/P@88w0rd) 访问 Web 控制台。
+```
+
